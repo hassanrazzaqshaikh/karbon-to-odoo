@@ -1,0 +1,9 @@
+{
+  "rewrites": [
+    { "source": "/webhooks/karbon", "destination": "/api/webhooks/karbon" },
+    { "source": "/health", "destination": "/api/health" }
+  ],
+  "functions": {
+    "api/webhooks/karbon.js": { "maxDuration": 60 }
+  }
+}

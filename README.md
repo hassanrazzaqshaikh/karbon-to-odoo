@@ -52,3 +52,12 @@ Content-Type: application/json
 Karbon allows one subscription per type; check with `GET /v3/WebhookSubscriptions/Invoice` and remove with
 `DELETE /v3/WebhookSubscriptions/Invoice`. A quick tunnel URL changes every time `npm run tunnel` restarts,
 so re-subscribe when it does. Karbon cancels the subscription after 10 consecutive failed deliveries.
+
+## Deploying the webhook receiver to Vercel
+
+`api/` holds the Vercel functions and `vercel.json` maps `/webhooks/karbon` and `/health` to them, so the
+Karbon `TargetUrl` is `https://<your-project>.vercel.app/webhooks/karbon`.
+
+`.env` is not deployed: add `KARBON_ACCESS_KEY`, `KARBON_BEARER_TOKEN`, `KARBON_WEBHOOK_SIGNING_KEY` and
+`WEBHOOK_SYNC_TO_ODOO` (plus the `ODOO_*` vars if syncing to Odoo) under Project Settings > Environment Variables,
+then redeploy. On Vercel events are written to the function logs only, not `logs/webhook-events.jsonl`.
