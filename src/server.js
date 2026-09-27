@@ -5,6 +5,7 @@ import {
   LOG_FILE,
   signingKey,
   syncToOdoo,
+  versionLabel,
   send,
   handleHealth,
   handleIndex,
@@ -29,7 +30,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`Karbon webhook receiver listening on http://localhost:${port}${WEBHOOK_PATH}`);
+  console.log(`Karbon webhook receiver ${versionLabel} listening on http://localhost:${port}${WEBHOOK_PATH}`);
   console.log(`Signature check: ${signingKey ? 'on' : 'OFF (set KARBON_WEBHOOK_SIGNING_KEY)'} | Sync to Odoo: ${syncToOdoo ? 'on (Odoo is checked when the first invoice arrives)' : 'off'}`);
   console.log(`Events are logged to ${LOG_FILE}`);
 });

@@ -61,3 +61,13 @@ Karbon `TargetUrl` is `https://<your-project>.vercel.app/webhooks/karbon`.
 `.env` is not deployed: add `KARBON_ACCESS_KEY`, `KARBON_BEARER_TOKEN`, `KARBON_WEBHOOK_SIGNING_KEY` and
 `WEBHOOK_SYNC_TO_ODOO` (plus the `ODOO_*` vars if syncing to Odoo) under Project Settings > Environment Variables,
 then redeploy. On Vercel events are written to the function logs only, not `logs/webhook-events.jsonl`.
+
+## Version number
+
+The index page (`/`) and `/health` show the version from `src/version.js` plus the deployed commit. A git
+pre-commit hook bumps the patch number on every commit, so each push deploys a higher version. Enable the hook
+once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```

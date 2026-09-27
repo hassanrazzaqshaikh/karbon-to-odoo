@@ -1,0 +1,4 @@
+#!/bin/sh
+# Bumps the version shown on the index page with every commit, so each push deploys a higher number.
+# Enabled per clone with: git config core.hooksPath .githooks
+node scripts/bump-version.js && git add src/version.js

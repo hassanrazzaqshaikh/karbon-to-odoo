@@ -8,6 +8,7 @@ import { loadConfig, requireOdooConfig } from './config.js';
 import { KarbonClient } from './karbon.js';
 import { OdooClient } from './odoo.js';
 import { syncInvoice } from './sync.js';
+import { VERSION } from './version.js';
 
 export const WEBHOOK_PATH = '/webhooks/karbon';
 export const LOG_FILE = path.resolve('logs', 'webhook-events.jsonl');
@@ -15,6 +16,9 @@ export const LOG_FILE = path.resolve('logs', 'webhook-events.jsonl');
 export const logToFile = !process.env.VERCEL;
 export const signingKey = process.env.KARBON_WEBHOOK_SIGNING_KEY;
 export const syncToOdoo = process.env.WEBHOOK_SYNC_TO_ODOO === 'true';
+// Set by Vercel on Git deployments; shown next to the version so the deployed commit can be checked.
+const commit = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7);
+export const versionLabel = `v${VERSION}${commit ? ` (commit ${commit})` : ''}`;
 
 // Created on first use rather than at import, so missing env vars show up as a clear error in the logs
 // instead of crashing the whole Vercel function (which would also break /health).
@@ -114,7 +118,7 @@ export function send(res, status, body) {
 
 export function handleHealth(req, res) {
   console.log(`[health] ${req.method} ${req.url}`);
-  send(res, 200, { ok: true });
+  send(res, 200, { ok: true, version: VERSION, commit: commit ?? null });
 }
 
 // Status page for GET /. Only shows whether settings are present, never their values.
@@ -138,6 +142,7 @@ export function handleIndex(req, res) {
   table { border-collapse: collapse; width: 100%; }
   td { padding: 8px 0; border-bottom: 1px solid #d0d7de; }
   .ok { color: #1a7f37; } .warn { color: #9a6700; }
+  .version { color: #59636e; font-size: 0.875rem; margin-top: 24px; }
   code { background: #f6f8fa; padding: 2px 6px; border-radius: 4px; }
 </style>
 </head>
@@ -150,6 +155,7 @@ export function handleIndex(req, res) {
   ${row('Sync to Odoo', true, syncToOdoo ? 'On' : 'Off')}
   ${syncToOdoo ? row('Odoo settings', odooReady, odooReady ? 'Set' : 'Missing (ODOO_URL, ODOO_DB, ODOO_USERNAME, ODOO_API_KEY)') : ''}
 </table>
+<p class="version">Version ${versionLabel}</p>
 </body>
 </html>
 `);
