@@ -1,5 +1,7 @@
 {
+  "framework": null,
   "rewrites": [
+    { "source": "/", "destination": "/api/index" },
     { "source": "/webhooks/karbon", "destination": "/api/webhooks/karbon" },
     { "source": "/health", "destination": "/api/health" }
   ],

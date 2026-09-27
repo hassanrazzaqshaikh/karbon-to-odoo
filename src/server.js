@@ -7,6 +7,7 @@ import {
   syncToOdoo,
   send,
   handleHealth,
+  handleIndex,
   handleKarbonWebhook,
 } from './webhook.js';
 
@@ -15,6 +16,9 @@ const port = Number(process.env.PORT) || 3000;
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
+  if (req.method === 'GET' && url.pathname === '/') {
+    return handleIndex(req, res);
+  }
   if (req.method === 'GET' && url.pathname === '/health') {
     return handleHealth(req, res);
   }

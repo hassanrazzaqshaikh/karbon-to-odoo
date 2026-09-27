@@ -98,6 +98,43 @@ export function handleHealth(req, res) {
   send(res, 200, { ok: true });
 }
 
+// Status page for GET /. Only shows whether settings are present, never their values.
+export function handleIndex(req, res) {
+  const karbonReady = Boolean(process.env.KARBON_ACCESS_KEY && process.env.KARBON_BEARER_TOKEN);
+  const odooReady = ['ODOO_URL', 'ODOO_DB', 'ODOO_USERNAME', 'ODOO_API_KEY'].every((key) => process.env[key]);
+  const row = (label, ok, text) =>
+    `<tr><td>${label}</td><td class="${ok ? 'ok' : 'warn'}">${text}</td></tr>`;
+
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karbon to Odoo</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 48px auto; padding: 0 16px; color: #1f2328; }
+  h1 { font-size: 1.5rem; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 8px 0; border-bottom: 1px solid #d0d7de; }
+  .ok { color: #1a7f37; } .warn { color: #9a6700; }
+  code { background: #f6f8fa; padding: 2px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>Karbon to Odoo</h1>
+<p>Webhook receiver is running. Karbon should POST invoice events to <code>${WEBHOOK_PATH}</code>.</p>
+<table>
+  ${row('Karbon API credentials', karbonReady, karbonReady ? 'Set' : 'Missing (KARBON_ACCESS_KEY, KARBON_BEARER_TOKEN)')}
+  ${row('Webhook signature check', Boolean(signingKey), signingKey ? 'On' : 'Off (KARBON_WEBHOOK_SIGNING_KEY not set)')}
+  ${row('Sync to Odoo', true, syncToOdoo ? 'On' : 'Off')}
+  ${syncToOdoo ? row('Odoo settings', odooReady, odooReady ? 'Set' : 'Missing (ODOO_URL, ODOO_DB, ODOO_USERNAME, ODOO_API_KEY)') : ''}
+</table>
+</body>
+</html>
+`);
+}
+
 // runInBackground receives the processing promise after Karbon has been answered: the local server just
 // lets it run, while Vercel must be told to keep the function alive until it settles (waitUntil).
 export async function handleKarbonWebhook(req, res, { runInBackground = () => {} } = {}) {
