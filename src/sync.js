@@ -30,23 +30,37 @@ function mapLines(invoice, { productId }) {
   });
 }
 
-async function findOrCreatePartner(odoo, name, { dryRun }) {
+async function findOrCreatePartner(odoo, name, { dryRun, log }) {
+  log(`Looking up Odoo customer "${name}"`);
   const [existing] = await odoo.searchRead('res.partner', [['name', '=', name]], ['id'], { limit: 1 });
-  if (existing) return existing.id;
+  if (existing) {
+    log(`Found Odoo customer id ${existing.id}`);
+    return existing.id;
+  }
   if (dryRun) return null;
-  return odoo.create('res.partner', { name, is_company: true, customer_rank: 1 });
+  log(`Customer not found, creating "${name}" in Odoo`);
+  const id = await odoo.create('res.partner', { name, is_company: true, customer_rank: 1 });
+  log(`Created Odoo customer id ${id}`);
+  return id;
 }
 
 // Syncs one Karbon invoice. Returns { status: 'exists' | 'would_create' | 'created', id?, ref, partnerName }.
-export async function syncInvoice({ invoice, karbon, odoo, config, dryRun = false }) {
+// log receives a line per step; the webhook passes one, the batch sync stays quiet.
+export async function syncInvoice({ invoice, karbon, odoo, config, dryRun = false, log = () => {} }) {
   const ref = invoiceRef(invoice);
+  log(`Checking Odoo for an existing invoice with ref ${ref}`);
   const [already] = await odoo.searchRead('account.move', [['ref', '=', ref], ['move_type', '=', 'out_invoice']], ['id'], { limit: 1 });
-  if (already) return { status: 'exists', id: already.id, ref };
+  if (already) {
+    log(`Invoice ${ref} already exists in Odoo (id ${already.id}), skipping`);
+    return { status: 'exists', id: already.id, ref };
+  }
 
+  if (!invoice.LineItems) log(`Invoice has no line items loaded, fetching ${invoice.InvoiceKey} from Karbon`);
   const full = invoice.LineItems ? invoice : await karbon.getInvoice(invoice.InvoiceKey);
   const partnerName = clientName(full);
-  const partnerId = await findOrCreatePartner(odoo, partnerName, { dryRun });
+  const partnerId = await findOrCreatePartner(odoo, partnerName, { dryRun, log });
   const lines = mapLines(full, config.odoo);
+  log(`Mapped ${lines.length} line(s) for ${ref}`);
 
   const values = {
     move_type: 'out_invoice',
@@ -60,7 +74,9 @@ export async function syncInvoice({ invoice, karbon, odoo, config, dryRun = fals
 
   if (dryRun) return { status: 'would_create', ref, partnerName, lines: lines.length };
 
+  log(`Creating invoice ${ref} in Odoo`);
   const id = await odoo.create('account.move', values);
+  log(`Created Odoo invoice id ${id}`);
   return { status: 'created', id, ref, partnerName };
 }
 

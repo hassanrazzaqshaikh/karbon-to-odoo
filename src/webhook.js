@@ -22,22 +22,34 @@ let config = null;
 let karbon = null;
 let odoo = null;
 
-function getKarbon() {
+// Prefixes every line with the request id so one delivery can be followed through the Vercel logs.
+function logger(requestId) {
+  return (message) => console.log(`[karbon-webhook ${requestId}] ${message}`);
+}
+
+function getKarbon(log) {
   if (!karbon) {
+    log('Loading Karbon settings');
     config = loadConfig({ requireOdoo: false });
     karbon = new KarbonClient(config.karbon);
+    log(`Karbon client ready (${config.karbon.baseUrl})`);
   }
   return karbon;
 }
 
 // Odoo settings are checked and the login made when the first invoice webhook arrives, not at startup.
 // The client is only kept after a successful login, so a failure is retried on the next webhook.
-async function getOdoo() {
+async function getOdoo(log) {
   if (!odoo) {
+    log('Checking Odoo settings');
     requireOdooConfig();
     const client = new OdooClient(config.odoo);
-    await client.login();
+    log(`Logging in to Odoo at ${config.odoo.url} (db ${config.odoo.db})`);
+    const uid = await client.login();
+    log(`Odoo login OK (uid ${uid})`);
     odoo = client;
+  } else {
+    log('Reusing existing Odoo login');
   }
   return odoo;
 }
@@ -57,27 +69,33 @@ function validSignature(rawBody, header) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-async function handleEvent(event) {
+async function handleEvent(event, log) {
   const receivedAt = new Date().toISOString();
+  log('Processing event in background');
   if (event.ResourceType !== 'Invoice') {
-    console.log(`[${receivedAt}] Ignoring ${event.ResourceType} event`);
+    log(`Ignoring ${event.ResourceType} event`);
     appendLog({ receivedAt, event });
     return;
   }
 
-  const invoice = await getKarbon().getInvoice(event.ResourcePermaKey);
-  console.log(
-    `[${receivedAt}] Invoice ${event.ActionType}: ${invoice.InvoiceNumber} | ${invoice.Client?.Name} | ` +
+  log(`Fetching invoice ${event.ResourcePermaKey} from Karbon`);
+  const invoice = await getKarbon(log).getInvoice(event.ResourcePermaKey);
+  log(
+    `Invoice ${event.ActionType}: ${invoice.InvoiceNumber} | ${invoice.Client?.Name} | ` +
       `${invoice.CurrencyCode} ${invoice.InvoiceTotal} | status=${invoice.InvoiceStatus} | ${invoice.LineItems?.length ?? 0} line(s)`,
   );
 
   let odooResult;
   if (syncToOdoo) {
-    odooResult = await syncInvoice({ invoice, karbon, odoo: await getOdoo(), config });
-    console.log(`  Odoo: ${odooResult.status}${odooResult.id ? ` (id ${odooResult.id})` : ''}`);
+    log('Sync to Odoo is on, starting sync');
+    odooResult = await syncInvoice({ invoice, karbon, odoo: await getOdoo(log), config, log });
+    log(`Odoo result: ${odooResult.status}${odooResult.id ? ` (id ${odooResult.id})` : ''}`);
+  } else {
+    log('Sync to Odoo is off (WEBHOOK_SYNC_TO_ODOO is not "true"), not sending to Odoo');
   }
 
   appendLog({ receivedAt, event, invoice, odooResult });
+  log('Done');
 }
 
 function readBody(req) {
@@ -95,11 +113,13 @@ export function send(res, status, body) {
 }
 
 export function handleHealth(req, res) {
+  console.log(`[health] ${req.method} ${req.url}`);
   send(res, 200, { ok: true });
 }
 
 // Status page for GET /. Only shows whether settings are present, never their values.
 export function handleIndex(req, res) {
+  console.log(`[index] ${req.method} ${req.url}`);
   const karbonReady = Boolean(process.env.KARBON_ACCESS_KEY && process.env.KARBON_BEARER_TOKEN);
   const odooReady = ['ODOO_URL', 'ODOO_DB', 'ODOO_USERNAME', 'ODOO_API_KEY'].every((key) => process.env[key]);
   const row = (label, ok, text) =>
@@ -138,29 +158,41 @@ export function handleIndex(req, res) {
 // runInBackground receives the processing promise after Karbon has been answered: the local server just
 // lets it run, while Vercel must be told to keep the function alive until it settles (waitUntil).
 export async function handleKarbonWebhook(req, res, { runInBackground = () => {} } = {}) {
+  const requestId = crypto.randomBytes(4).toString('hex');
+  const log = logger(requestId);
+  log(`${req.method} ${req.url} received (Signature header ${req.headers.signature ? 'present' : 'missing'})`);
+
   if (req.method !== 'POST') {
+    log(`Rejected: method ${req.method} not allowed, replying 405`);
     return send(res, 405, { error: 'Method not allowed' });
   }
 
   const rawBody = await readBody(req);
+  log(`Read body (${rawBody.length} bytes)`);
+
+  if (!signingKey) log('KARBON_WEBHOOK_SIGNING_KEY not set, skipping signature check');
   if (!validSignature(rawBody, req.headers.signature)) {
-    console.warn(`[${new Date().toISOString()}] Rejected webhook: bad or missing Signature header`);
+    log('Rejected: bad or missing Signature header, replying 401');
     return send(res, 401, { error: 'Invalid signature' });
   }
+  if (signingKey) log('Signature valid');
 
   let event;
   try {
     event = JSON.parse(rawBody.toString('utf8'));
   } catch {
+    log('Rejected: body is not valid JSON, replying 400');
     return send(res, 400, { error: 'Invalid JSON' });
   }
+  log(`Event: ${event.ResourceType} ${event.ActionType} ${event.ResourcePermaKey} at ${event.TimeStamp}`);
 
   // Acknowledge immediately: Karbon cancels the subscription after 10 consecutive non-2xx/timeouts.
   send(res, 200, { received: true });
+  log('Replied 200 to Karbon');
 
   runInBackground(
-    handleEvent(event).catch((err) => {
-      console.error(`  Failed to process ${event.ResourceType} ${event.ResourcePermaKey}: ${err.message}`);
+    handleEvent(event, log).catch((err) => {
+      log(`FAILED processing ${event.ResourceType} ${event.ResourcePermaKey}: ${err.message}`);
       appendLog({ receivedAt: new Date().toISOString(), event, error: err.message });
     }),
   );
