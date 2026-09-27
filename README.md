@@ -5,7 +5,7 @@ Pulls invoices from the Karbon v3 API and creates them as customer invoices (`ac
 
 ## Setup
 
-Requires Node.js 18+.
+Requires Node.js 22.
 
 ```bash
 npm install

@@ -19,8 +19,9 @@ function mapLines(invoice, { productId }) {
   }
   return lines.map((line) => {
     const quantity = Number(line.Quantity ?? 1) || 1;
-    const amount = Number(line.Amount ?? line.Total ?? 0);
-    const priceUnit = line.UnitPrice ?? line.Rate ?? amount / quantity;
+    const amount = line.Amount ?? line.Total;
+    // Amount is the line total Karbon bills; UnitPrice can be 0 on fixed-fee lines, so derive the price from Amount.
+    const priceUnit = amount != null ? Number(amount) / quantity : Number(line.UnitPrice ?? line.Rate ?? 0);
     return {
       name: line.Description || line.Name || 'Karbon service',
       quantity,
@@ -28,6 +29,19 @@ function mapLines(invoice, { productId }) {
       ...(productId ? { product_id: productId } : {}),
     };
   });
+}
+
+// Odoo only accepts active currencies on invoices; an inactive one would silently fall back to the company currency.
+async function findCurrency(odoo, code, { log }) {
+  log(`Looking up Odoo currency ${code}`);
+  const [currency] = await odoo.searchRead('res.currency', [['name', '=', code]], ['id'], { limit: 1 });
+  if (!currency) {
+    throw new Error(
+      `Currency ${code} is not active in Odoo. Activate it under Accounting > Configuration > Currencies, then re-approve the invoice in Karbon.`,
+    );
+  }
+  log(`Found Odoo currency ${code} (id ${currency.id})`);
+  return currency.id;
 }
 
 async function findOrCreatePartner(odoo, name, { dryRun, log }) {
@@ -58,9 +72,10 @@ export async function syncInvoice({ invoice, karbon, odoo, config, dryRun = fals
   if (!invoice.LineItems) log(`Invoice has no line items loaded, fetching ${invoice.InvoiceKey} from Karbon`);
   const full = invoice.LineItems ? invoice : await karbon.getInvoice(invoice.InvoiceKey);
   const partnerName = clientName(full);
+  const currencyId = full.CurrencyCode ? await findCurrency(odoo, full.CurrencyCode, { log }) : undefined;
   const partnerId = await findOrCreatePartner(odoo, partnerName, { dryRun, log });
   const lines = mapLines(full, config.odoo);
-  log(`Mapped ${lines.length} line(s) for ${ref}`);
+  log(`Mapped ${lines.length} line(s) for ${ref}: ${lines.map((line) => `${line.quantity} x ${line.price_unit}`).join(', ')}`);
 
   const values = {
     move_type: 'out_invoice',
@@ -69,6 +84,7 @@ export async function syncInvoice({ invoice, karbon, odoo, config, dryRun = fals
     invoice_date: toDate(full.InvoiceDate),
     invoice_date_due: toDate(full.PaymentDueDate ?? full.DueDate),
     invoice_line_ids: lines.map((line) => [0, 0, line]),
+    ...(currencyId ? { currency_id: currencyId } : {}),
     ...(config.odoo.journalId ? { journal_id: config.odoo.journalId } : {}),
   };
 

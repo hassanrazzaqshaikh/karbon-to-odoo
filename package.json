@@ -13,7 +13,7 @@
     "tunnel": "cloudflared tunnel --url http://localhost:3000"
   },
   "engines": {
-    "node": ">=18"
+    "node": "22.x"
   },
   "license": "MIT",
   "dependencies": {

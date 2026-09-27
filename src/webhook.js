@@ -83,7 +83,20 @@ async function handleEvent(event, log) {
   }
 
   log(`Fetching invoice ${event.ResourcePermaKey} from Karbon`);
-  const invoice = await getKarbon(log).getInvoice(event.ResourcePermaKey);
+  let invoice;
+  try {
+    invoice = await getKarbon(log).getInvoice(event.ResourcePermaKey);
+  } catch (err) {
+    // Karbon can deliver an event after the invoice was deleted or moved back to draft; that is not a failure.
+    if (err.status !== 404) throw err;
+    log(
+      `Invoice ${event.ResourcePermaKey} no longer exists in Karbon (deleted or moved back to draft after the ` +
+        `${event.ActionType} event was sent), skipping. Nothing was sent to Odoo.`,
+    );
+    appendLog({ receivedAt, event, skipped: 'invoice not found in Karbon' });
+    return;
+  }
+  log(`Karbon invoice data: ${JSON.stringify(invoice)}`);
   log(
     `Invoice ${event.ActionType}: ${invoice.InvoiceNumber} | ${invoice.Client?.Name} | ` +
       `${invoice.CurrencyCode} ${invoice.InvoiceTotal} | status=${invoice.InvoiceStatus} | ${invoice.LineItems?.length ?? 0} line(s)`,
@@ -174,7 +187,7 @@ export async function handleKarbonWebhook(req, res, { runInBackground = () => {}
   }
 
   const rawBody = await readBody(req);
-  log(`Read body (${rawBody.length} bytes)`);
+  log(`Read body (${rawBody.length} bytes): ${rawBody.toString('utf8')}`);
 
   if (!signingKey) log('KARBON_WEBHOOK_SIGNING_KEY not set, skipping signature check');
   if (!validSignature(rawBody, req.headers.signature)) {
