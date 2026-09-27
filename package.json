@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "Karbon to Odoo Invoicing Sample",
   "type": "module",
-  "main": "src/index.js",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node src/server.js",
     "sync": "node src/index.js",
     "dry-run": "node src/index.js --dry-run",
     "check": "node src/check.js",

@@ -17,7 +17,7 @@ npm install
 ```bash
 npm run check     # test Karbon + Odoo credentials, writes nothing
 npm run dry-run   # show what would be created in Odoo
-npm start         # run the sync
+npm run sync      # run the sync
 ```
 
 Set `SYNC_SINCE=YYYY-MM-DD` in `.env` to limit which Karbon invoices are pulled.
@@ -30,7 +30,7 @@ then fetches the full invoice from Karbon and logs it to the console and `logs/w
 Set `WEBHOOK_SYNC_TO_ODOO=true` to also create the invoice in Odoo.
 
 ```bash
-npm run server    # terminal 1: listens on http://localhost:3000
+npm start         # terminal 1: listens on http://localhost:3000
 npm run tunnel    # terminal 2: prints a public https://xxxx.trycloudflare.com URL
 ```
 
