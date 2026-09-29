@@ -30,6 +30,7 @@ export function loadConfig({ requireOdoo = true } = {}) {
       db: process.env.ODOO_DB,
       username: process.env.ODOO_USERNAME,
       apiKey: process.env.ODOO_API_KEY,
+      companyId: optionalInt(process.env.ODOO_COMPANY_ID),
       journalId: optionalInt(process.env.ODOO_JOURNAL_ID),
       productId: optionalInt(process.env.ODOO_PRODUCT_ID),
     },

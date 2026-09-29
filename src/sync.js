@@ -31,6 +31,46 @@ function mapLines(invoice, { productId }) {
   });
 }
 
+// Where the Odoo company for an invoice comes from. The Karbon invoice itself has no company field, so fill this in
+// from the Karbon call that knows it (e.g. the client's details). Returning undefined falls back to ODOO_COMPANY_ID.
+async function karbonCompanyName(invoice, karbon) {
+  return undefined;
+}
+
+// Matches a company name to one of the API user's Allowed Companies in Odoo (case-insensitive), else ODOO_COMPANY_ID,
+// else the user's default company.
+async function resolveCompany(odoo, name, { fallbackId, log }) {
+  const { defaultId, list } = await odoo.companies();
+  if (name) {
+    const wanted = name.trim().toLowerCase();
+    const match = list.find((company) => company.name.trim().toLowerCase() === wanted);
+    if (!match) {
+      throw new Error(
+        `Odoo company "${name}" not found among this user's allowed companies (${list.map((c) => c.name).join(', ')}). ` +
+          "Rename it to match, or add it to the API user's Allowed Companies in Odoo.",
+      );
+    }
+    log(`Using Odoo company "${match.name}" (id ${match.id})`);
+    return match.id;
+  }
+  const id = fallbackId ?? defaultId;
+  const company = list.find((c) => c.id === id);
+  if (!company) throw new Error(`ODOO_COMPANY_ID=${id} is not one of this user's allowed companies`);
+  log(`No company name from Karbon, using ${fallbackId ? 'ODOO_COMPANY_ID' : 'the user default'} "${company.name}" (id ${id})`);
+  return id;
+}
+
+// ODOO_JOURNAL_ID only fits invoices of the journal's own company; other companies get their default sales journal.
+async function journalFor(odoo, journalId, companyId, { log }) {
+  if (!journalId) return undefined;
+  const [journal] = await odoo.searchRead('account.journal', [['id', '=', journalId]], ['company_id'], {
+    context: { allowed_company_ids: [companyId] },
+  });
+  if (journal?.company_id[0] === companyId) return journalId;
+  log(`ODOO_JOURNAL_ID ${journalId} belongs to another company, letting Odoo pick this company's sales journal`);
+  return undefined;
+}
+
 // Odoo only accepts active currencies on invoices; an inactive one would silently fall back to the company currency.
 async function findCurrency(odoo, code, { log }) {
   log(`Looking up Odoo currency ${code}`);
@@ -44,9 +84,11 @@ async function findCurrency(odoo, code, { log }) {
   return currency.id;
 }
 
-async function findOrCreatePartner(odoo, name, { dryRun, log }) {
+async function findOrCreatePartner(odoo, name, { companyId, dryRun, log }) {
   log(`Looking up Odoo customer "${name}"`);
-  const [existing] = await odoo.searchRead('res.partner', [['name', '=', name]], ['id'], { limit: 1 });
+  // A partner restricted to another company can't be invoiced from this one; shared partners (no company) are fine.
+  const domain = [['name', '=', name], ...(companyId ? [['company_id', 'in', [companyId, false]]] : [])];
+  const [existing] = await odoo.searchRead('res.partner', domain, ['id'], { limit: 1 });
   if (existing) {
     log(`Found Odoo customer id ${existing.id}`);
     return existing.id;
@@ -63,18 +105,24 @@ async function findOrCreatePartner(odoo, name, { dryRun, log }) {
 export async function syncInvoice({ invoice, karbon, odoo, config, dryRun = false, log = () => {} }) {
   const ref = invoiceRef(invoice);
   log(`Checking Odoo for an existing invoice with ref ${ref}`);
-  const [already] = await odoo.searchRead('account.move', [['ref', '=', ref], ['move_type', '=', 'out_invoice']], ['id'], { limit: 1 });
+  // Karbon invoice numbers are unique across the practice, so this check spans all companies.
+  const [already] = await odoo.searchRead('account.move', [['ref', '=', ref], ['move_type', '=', 'out_invoice']], ['id', 'company_id'], {
+    limit: 1,
+    context: { allowed_company_ids: (await odoo.companies()).list.map((c) => c.id) },
+  });
   if (already) {
-    log(`Invoice ${ref} already exists in Odoo (id ${already.id}), skipping`);
+    log(`Invoice ${ref} already exists in Odoo (id ${already.id}, company "${already.company_id[1]}"), skipping`);
     return { status: 'exists', id: already.id, ref };
   }
 
   if (!invoice.LineItems) log(`Invoice has no line items loaded, fetching ${invoice.InvoiceKey} from Karbon`);
   const full = invoice.LineItems ? invoice : await karbon.getInvoice(invoice.InvoiceKey);
   const partnerName = clientName(full);
+  const companyId = await resolveCompany(odoo, await karbonCompanyName(full, karbon), { fallbackId: config.odoo.companyId, log });
   const currencyId = full.CurrencyCode ? await findCurrency(odoo, full.CurrencyCode, { log }) : undefined;
-  const partnerId = await findOrCreatePartner(odoo, partnerName, { dryRun, log });
+  const partnerId = await findOrCreatePartner(odoo, partnerName, { companyId, dryRun, log });
   const lines = mapLines(full, config.odoo);
+  const journalId = await journalFor(odoo, config.odoo.journalId, companyId, { log });
   log(`Mapped ${lines.length} line(s) for ${ref}: ${lines.map((line) => `${line.quantity} x ${line.price_unit}`).join(', ')}`);
 
   const values = {
@@ -84,16 +132,17 @@ export async function syncInvoice({ invoice, karbon, odoo, config, dryRun = fals
     invoice_date: toDate(full.InvoiceDate),
     invoice_date_due: toDate(full.PaymentDueDate ?? full.DueDate),
     invoice_line_ids: lines.map((line) => [0, 0, line]),
+    company_id: companyId,
     ...(currencyId ? { currency_id: currencyId } : {}),
-    ...(config.odoo.journalId ? { journal_id: config.odoo.journalId } : {}),
+    ...(journalId ? { journal_id: journalId } : {}),
   };
 
   if (dryRun) return { status: 'would_create', ref, partnerName, lines: lines.length };
 
   log(`Creating invoice ${ref} in Odoo`);
-  const id = await odoo.create('account.move', values);
+  const id = await odoo.create('account.move', values, { allowed_company_ids: [companyId] });
   log(`Created Odoo invoice id ${id}`);
-  return { status: 'created', id, ref, partnerName };
+  return { status: 'created', id, ref, partnerName, companyId };
 }
 
 export async function syncInvoices({ karbon, odoo, config, dryRun = false, log = console.log }) {

@@ -21,6 +21,16 @@ async function main() {
     const { server_version: version } = await odoo.version();
     const uid = await odoo.login();
     console.log(`Odoo:   OK (server ${version}, uid ${uid})`);
+    const { defaultId, list: companies } = await odoo.companies();
+    console.log('Odoo companies this user can invoice into (Karbon company names must match these):');
+    for (const company of companies) {
+      const marks = [company.id === defaultId && 'user default', company.id === config.odoo.companyId && 'ODOO_COMPANY_ID'].filter(Boolean);
+      console.log(`  ${company.id}  ${company.name} (${company.currency_id[1]})${marks.length ? `  <- ${marks.join(', ')}` : ''}`);
+    }
+    if (config.odoo.companyId && !companies.some((company) => company.id === config.odoo.companyId)) {
+      ok = false;
+      console.error(`Odoo:   ODOO_COMPANY_ID=${config.odoo.companyId} is not one of this user's allowed companies`);
+    }
   } catch (err) {
     ok = false;
     console.error(`Odoo:   FAILED - ${err.message}`);

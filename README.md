@@ -22,6 +22,11 @@ npm run sync      # run the sync
 
 Set `SYNC_SINCE=YYYY-MM-DD` in `.env` to limit which Karbon invoices are pulled.
 
+Multi-company: each invoice is created in the Odoo company whose name matches the company name from Karbon
+(case-insensitive, see `karbonCompanyName` in `src/sync.js`). The API user needs every such company in its
+Allowed Companies; `npm run check` lists them. When Karbon gives no company, `ODOO_COMPANY_ID` is used, else the
+user's default company. `ODOO_JOURNAL_ID` only applies to invoices in that journal's company.
+
 ## Webhook receiver (Karbon -> this server)
 
 Karbon POSTs to `/webhooks/karbon` whenever an invoice is created or changed. The server verifies the

@@ -7,6 +7,7 @@ export class OdooClient {
     this.apiKey = apiKey;
     this.uid = null;
     this.requestId = 0;
+    this.companiesCache = null;
   }
 
   async rpc(service, method, args) {
@@ -46,8 +47,20 @@ export class OdooClient {
     return this.execute(model, 'search_read', [domain], { fields, ...extra });
   }
 
-  create(model, values) {
-    return this.execute(model, 'create', [values]);
+  // context.allowed_company_ids = [id] makes Odoo pick defaults (journal, accounts, taxes) from that company.
+  create(model, values, context) {
+    return this.execute(model, 'create', [values], context ? { context } : {});
+  }
+
+  // Companies the API user may work in (their Allowed Companies), plus which one is their default. Cached per client.
+  async companies() {
+    if (!this.companiesCache) {
+      if (!this.uid) await this.login();
+      const [user] = await this.searchRead('res.users', [['id', '=', this.uid]], ['company_id', 'company_ids']);
+      const list = await this.searchRead('res.company', [['id', 'in', user.company_ids]], ['id', 'name', 'currency_id']);
+      this.companiesCache = { defaultId: user.company_id[0], list };
+    }
+    return this.companiesCache;
   }
 
   version() {
