@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>KarboSync User Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Darker+Grotesque:wght@600;700;800&family=Roboto:wght@400;500;700&display=swap">
+<style>
+  @page { size: A4; margin: 18mm 17mm 20mm; }
+  @page :first { margin: 0; }
+  :root {
+    --teak: #513729; --wood: #946946; --sand: #a79f8d; --linen: #e7e2db; --paper: #faf8f5;
+    --fg: #2b211b; --muted: #6f6357; --line: #e0d8cd; --ok: #2f6b1a; --bad: #b3261e; --tip: #f3efe9;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; font: 10.5pt/1.55 Roboto, 'Segoe UI', sans-serif; color: var(--fg); }
+  h1, h2, h3, .brand-name { font-family: 'Darker Grotesque', 'Segoe UI', sans-serif; color: var(--teak); }
+  h2 { font-size: 24pt; font-weight: 800; line-height: 1.05; margin: 0 0 4mm; padding-bottom: 2.5mm; border-bottom: 2px solid var(--teak); break-after: avoid; }
+  h3 { font-size: 15pt; font-weight: 800; margin: 7mm 0 2mm; break-after: avoid; }
+  h2 .num { color: var(--wood); margin-right: 3mm; }
+  p { margin: 0 0 3mm; }
+  ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
+  li { margin-bottom: 1.2mm; }
+  strong { font-weight: 700; }
+  .ui { font-weight: 500; color: var(--teak); background: var(--tip); border: 1px solid var(--line); border-radius: 3px; padding: 0 1.5mm; white-space: nowrap; }
+  code { font: 9pt Consolas, 'Courier New', monospace; background: var(--tip); padding: 0.3mm 1.2mm; border-radius: 2px; }
+  section { break-before: page; }
+  figure { margin: 4mm 0 5mm; break-inside: avoid; }
+  figure img { display: block; width: 100%; border: 1px solid var(--line); border-radius: 2.5mm; box-shadow: 0 1mm 3mm rgba(81, 55, 41, 0.10); }
+  figure.narrow img { width: 62%; margin: 0 auto; }
+  figure.mid img { width: 78%; margin: 0 auto; }
+  .crop { border: 1px solid var(--line); border-radius: 2.5mm; overflow: hidden; box-shadow: 0 1mm 3mm rgba(81, 55, 41, 0.10); }
+  .crop img { border: 0; border-radius: 0; box-shadow: none; }
+  .crop img { width: 100%; }
+  .crop.result { aspect-ratio: 2360 / 720; }
+  .crop.select { aspect-ratio: 2360 / 1060; }
+  .crop.error { aspect-ratio: 1 / 0.62; }
+  .crop.error img { height: 100%; object-fit: cover; object-position: 50% 82%; }
+  figcaption { font-size: 9pt; color: var(--muted); margin-top: 2mm; text-align: center; }
+  .note { background: var(--tip); border-left: 3px solid var(--wood); border-radius: 0 2mm 2mm 0; padding: 3mm 4mm; margin: 4mm 0; break-inside: avoid; }
+  .note.warn { border-left-color: var(--bad); }
+  .note strong:first-child { color: var(--teak); }
+  .steps { counter-reset: step; list-style: none; padding: 0; }
+  .steps > li { counter-increment: step; position: relative; padding-left: 10mm; margin-bottom: 2.5mm; break-inside: avoid; }
+  .steps > li::before { content: counter(step); position: absolute; left: 0; top: 0.2mm; width: 6.5mm; height: 6.5mm; border-radius: 50%; background: var(--teak); color: #fff; font: 700 9pt/6.5mm Roboto, sans-serif; text-align: center; }
+  table { width: 100%; border-collapse: collapse; margin: 3mm 0 5mm; font-size: 9.5pt; break-inside: auto; }
+  th { text-align: left; background: var(--teak); color: #fff; font-weight: 500; padding: 2mm 3mm; }
+  td { padding: 2mm 3mm; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr { break-inside: avoid; }
+  tbody tr:nth-child(even) td { background: #fcfaf7; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; align-items: start; }
+  .two figure { margin-top: 0; }
+
+  /* Cover */
+  .cover { height: 297mm; padding: 0; display: flex; flex-direction: column; background: var(--paper); break-after: page; }
+  .cover .band { background: var(--teak); color: #fff; padding: 34mm 22mm 22mm; position: relative; overflow: hidden; }
+  .cover .band::after { content: ''; position: absolute; right: -30mm; top: -30mm; width: 110mm; height: 110mm; border-radius: 50%; border: 14mm solid rgba(255, 255, 255, 0.06); }
+  .cover .logo { width: 30mm; height: 30mm; margin-bottom: 10mm; }
+  .cover .brand-name { color: #fff; font-size: 54pt; font-weight: 800; line-height: 0.9; margin: 0; }
+  .cover .kicker { font-size: 12pt; letter-spacing: 0.2em; text-transform: uppercase; color: var(--linen); margin: 0 0 3mm; }
+  .cover .title { font-family: 'Darker Grotesque', sans-serif; font-size: 30pt; font-weight: 700; color: var(--linen); margin: 4mm 0 0; }
+  .cover .body { padding: 16mm 22mm; flex: 1; }
+  .cover .body p { font-size: 12pt; max-width: 150mm; }
+  .cover .toc { margin-top: 10mm; columns: 2; column-gap: 12mm; font-size: 10.5pt; }
+  .cover .toc div { padding: 1.6mm 0; border-bottom: 1px solid var(--line); break-inside: avoid; }
+  .cover .toc span { color: var(--wood); font-weight: 700; display: inline-block; width: 8mm; }
+  .cover .meta { padding: 0 22mm 16mm; color: var(--muted); font-size: 9.5pt; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+
+<!-- ============ COVER ============ -->
+<div class="cover">
+  <div class="band">
+    <svg class="logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="15" fill="#946946"/><g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.5"><path d="M15.5 22.5A19 19 0 0 1 48.5 22.5"/><path d="M49 15.3 48.5 22.5 42 19.3"/><path d="M48.5 41.5A19 19 0 0 1 15.5 41.5"/><path d="M15 48.7 15.5 41.5 22 44.7"/><path stroke-width="4" d="M26.5 23.5v17M37.5 23.5 28 32l9.5 8.5"/></g></svg>
+    <p class="kicker">Teakwood Global Services</p>
+    <h1 class="brand-name">KarboSync</h1>
+    <p class="title">User Guide</p>
+  </div>
+  <div class="body">
+    <p>KarboSync takes the invoices you have <strong>approved in Karbon</strong> and creates them as customer invoices in <strong>Odoo</strong>. You choose which invoices to send, which Odoo company they belong to, which Odoo customer they are billed to, and whether they become separate Odoo invoices or one combined invoice.</p>
+    <p>This guide walks through signing in, finding invoices, selecting them and sending them to Odoo, with step-by-step examples for the most common situations.</p>
+    <div class="toc">
+      <div><span>1</span>Signing in</div>
+      <div><span>2</span>The approved invoice list</div>
+      <div><span>3</span>Choosing the Odoo company</div>
+      <div><span>4</span>Selecting invoices</div>
+      <div><span>5</span>The Send to Odoo window</div>
+      <div><span>6</span>Step-by-step examples</div>
+      <div><span>7</span>What you will see in Odoo</div>
+      <div><span>8</span>Sending again and avoiding duplicates</div>
+      <div><span>9</span>Troubleshooting</div>
+      <div><span>10</span>Quick reference</div>
+    </div>
+  </div>
+  <div class="meta"><span>App address: <strong>https://karbon-to-odoo.vercel.app</strong></span><span>Version 1.0 · November 2026</span></div>
+</div>
+
+<!-- ============ 1. SIGN IN ============ -->
+<section>
+  <h2><span class="num">1</span>Signing in</h2>
+  <p>Open <strong>https://karbon-to-odoo.vercel.app</strong> in your browser. You sign in with your <strong>Odoo</strong> account: the same username (usually your email) and password you use to log in to Odoo. There is no separate KarboSync password.</p>
+  <div class="two">
+    <figure><img src="img/01-login.png" alt="KarboSync sign-in page"><figcaption>The sign-in page. The Odoo database name is shown under the logo.</figcaption></figure>
+    <div>
+      <ol class="steps">
+        <li>Enter your <strong>Odoo username or email</strong>.</li>
+        <li>Enter your <strong>Odoo password</strong>.</li>
+        <li>Click <span class="ui">Sign in</span>. The invoice list opens.</li>
+      </ol>
+      <div class="note"><strong>Who can sign in?</strong> Any Odoo user who is allowed to create customer invoices in Odoo. If you see <em>"Your Odoo user is not allowed to create customer invoices"</em>, ask your Odoo administrator to give you invoicing rights.</div>
+      <div class="note"><strong>Two-factor authentication.</strong> If your Odoo login uses an authenticator app, enter an <strong>Odoo API key</strong> instead of your password. Create one in Odoo under <em>My Profile › Account Security › New API Key</em>.</div>
+    </div>
+  </div>
+  <h3>Staying signed in and signing out</h3>
+  <div class="two">
+    <ul>
+      <li>You stay signed in for <strong>8 hours</strong>. After that KarboSync takes you back to the sign-in page.</li>
+      <li>To sign out, click <span class="ui">Sign out</span> next to your name at the top of the page. Always sign out on a shared computer.</li>
+      <li>After <strong>5 wrong passwords</strong> in a row, that username is locked for <strong>5 minutes</strong>. Wait, then try again.</li>
+    </ul>
+    <figure><div class="crop error"><img src="img/02-login-error.png" alt="Sign-in error"></div><figcaption>Sign-in problems are shown in red under the button.</figcaption></figure>
+  </div>
+</section>
+
+<!-- ============ 2. LIST ============ -->
+<section>
+  <h2><span class="num">2</span>The approved invoice list</h2>
+  <p>After signing in, KarboSync loads your <strong>approved Karbon invoices</strong>, newest first. Only invoices with the status <strong>Approved</strong> are listed: approve an invoice in Karbon first and it appears here. While the list loads you see a spinning loader; this usually takes a few seconds.</p>
+  <figure><img src="img/04-list.png" alt="The approved invoice list"><figcaption>The main screen: the toolbar at the top and the approved Karbon invoices below.</figcaption></figure>
+  <h3>Reading the list</h3>
+  <table>
+    <thead><tr><th style="width:28%">Part of the screen</th><th>What it means</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Invoice, Date, Due</strong></td><td>The Karbon invoice number, invoice date and payment due date.</td></tr>
+      <tr><td><strong>Client</strong></td><td>The client the invoice is for in Karbon.</td></tr>
+      <tr><td><strong>Total</strong></td><td>The invoice total in its own currency.</td></tr>
+      <tr><td><strong>Odoo</strong></td><td>Empty when the invoice is not in Odoo yet. Otherwise it shows the Odoo invoice (for example <em>Draft #37</em> or <em>INV/2026/00038</em>), the Odoo company and the Odoo customer. Click the invoice to open it in Odoo.</td></tr>
+      <tr><td><strong>Status line</strong></td><td>Under the toolbar, for example <em>"Showing 13 of 412 approved invoices · 11 not yet in Odoo"</em>. It also shows progress and results while sending.</td></tr>
+    </tbody>
+  </table>
+  <h3>Toolbar</h3>
+  <table>
+    <thead><tr><th style="width:28%">Control</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><span class="ui">Filter by number or client</span></td><td>Shows only invoices whose number or client name contains what you type. It searches the invoices already loaded on the page.</td></tr>
+      <tr><td><span class="ui">Hide invoices already in Odoo</span></td><td>On by default, so the list shows only what still needs sending. Untick it to see everything, including invoices already in Odoo.</td></tr>
+      <tr><td><span class="ui">Reload</span></td><td>Fetches the list again from Karbon and Odoo. Use it after approving new invoices in Karbon, or after changing invoices in Odoo. It clears your current selection.</td></tr>
+      <tr><td><span class="ui">Load more</span></td><td>At the bottom of the list. Loads the next 100 older invoices.</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><strong>Looking for an older invoice?</strong> The filter only searches invoices loaded on the page. If you can't find one, click <span class="ui">Load more</span> until it appears, or until the button disappears.</div>
+</section>
+
+<div>
+  <h3>Invoices already in Odoo</h3>
+  <p>Untick <span class="ui">Hide invoices already in Odoo</span> to see them. Their checkbox is greyed out, because an invoice can only be in Odoo once.</p>
+  <figure><img src="img/06-already-in-odoo.png" alt="Invoices already in Odoo"><figcaption>With the box unticked: KIN-12034 is already confirmed in Odoo as INV/2026/00038 and KIN-12032 is in Odoo as a draft. Neither can be selected.</figcaption></figure>
+  <div class="note"><strong>Cancelled in Odoo?</strong> If an Odoo invoice is <strong>cancelled</strong>, KarboSync no longer counts it. After a <span class="ui">Reload</span>, the Karbon invoice appears again as "not in Odoo" and can be sent again.</div>
+
+  <h2 style="margin-top:10mm; break-before: page"><span class="num">3</span>Choosing the Odoo company</h2>
+  <p>Pick the Odoo company the invoices belong to in the <span class="ui">Odoo company</span> drop-down at the top right. The currency after the name is that company's own currency.</p>
+  <figure><img src="img/05-header.png" alt="The toolbar"><figcaption>The top bar: your name and Sign out, the Odoo company, and the Send button.</figcaption></figure>
+  <ul>
+    <li>The list only contains the companies <strong>your Odoo user is allowed to use</strong>. If a company is missing, ask your Odoo administrator to add it to your <em>Allowed Companies</em>.</li>
+    <li>If you only have one company, it is chosen for you.</li>
+    <li>Everything you send goes to the company selected at that moment. You can change company between sends.</li>
+  </ul>
+</div>
+
+<!-- ============ 4. SELECT ============ -->
+<div>
+  <h2 style="margin-top:10mm"><span class="num">4</span>Selecting invoices</h2>
+  <ul>
+    <li>Tick the box at the start of each invoice you want to send.</li>
+    <li>The box in the header row selects or clears <strong>all invoices currently shown</strong>. Combine it with the filter to select, for example, every invoice for one client.</li>
+    <li>The <span class="ui">Send to Odoo</span> button changes to show how many you have selected and where they will go, for example <span class="ui">Send 3 to Teak Central</span>.</li>
+    <li>Your selection is kept when you filter, so you can filter for one client, tick their invoices, then filter for another client and tick more.</li>
+  </ul>
+  <figure><div class="crop select"><img src="img/07-filter-select.png" alt="Filtering and selecting"></div><figcaption>Typing "harbor" in the filter shows the three Harbor Point Dental invoices; the header checkbox selected all three.</figcaption></figure>
+  <div class="note"><strong>Tip.</strong> Before sending, check the <strong>Odoo company</strong> drop-down. The button text always tells you the company that will be used.</div>
+</div>
+
+<!-- ============ 5. DIALOG ============ -->
+<section>
+  <h2><span class="num">5</span>The Send to Odoo window</h2>
+  <p>Click <span class="ui">Send … to …</span>. A window opens where you decide <strong>who</strong> the invoices are billed to in Odoo and, when more than one is selected, <strong>how many</strong> Odoo invoices to create. Nothing is sent until you click the button at the bottom of this window; <span class="ui">Cancel</span> closes it without sending.</p>
+  <div class="two">
+    <figure><img src="img/08-dialog-match.png" alt="Send window, default options"><figcaption>The window opens with the most common choices already selected.</figcaption></figure>
+    <div>
+      <p>The top of the window summarises your selection: how many invoices, which Odoo company, the total, and the Karbon client (or how many different clients).</p>
+      <h3 style="margin-top:2mm">Odoo customer</h3>
+      <table>
+        <tbody>
+          <tr><td style="width:44%"><strong>Match each invoice's Karbon client</strong><br><em>(default)</em></td><td>Each invoice goes to the Odoo customer with <strong>exactly the same name</strong> as its Karbon client. If no such customer exists, KarboSync creates it.</td></tr>
+          <tr><td><strong>Send all to an existing Odoo customer</strong></td><td>Every selected invoice goes to one customer you pick from Odoo, even if the Karbon client names differ.</td></tr>
+          <tr><td><strong>Create a new Odoo customer and send all to it</strong></td><td>KarboSync creates one new Odoo customer with the name you type, and every selected invoice goes to it.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <h3>Odoo invoices <span style="font-weight:600;color:var(--muted);font-size:11pt">(only when two or more invoices are selected)</span></h3>
+  <table>
+    <tbody>
+      <tr><td style="width:36%"><strong>One Odoo invoice per Karbon invoice</strong><br><em>(default)</em></td><td>Each Karbon invoice becomes its own Odoo invoice. Sent one after another; each row shows its own result.</td></tr>
+      <tr><td><strong>Combine into one Odoo invoice</strong></td><td>All selected Karbon invoices become <strong>a single Odoo invoice</strong>. Each Karbon invoice appears as a section heading (its number and date) followed by its lines. The invoices must share <strong>one currency</strong> and go to <strong>one customer</strong>.</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><strong>Which one should I use?</strong> See the <strong>Quick reference</strong> table at the end of this guide: it lists each situation and the exact choices to make.</div>
+</section>
+
+<section>
+  <h3 style="margin-top:0">Picking an existing Odoo customer</h3>
+  <div class="two">
+    <figure><img src="img/09-dialog-existing.png" alt="Choosing an existing Odoo customer"><figcaption>Search, then click the customer to select it.</figcaption></figure>
+    <div>
+      <ol class="steps">
+        <li>Choose <strong>Send all to an existing Odoo customer</strong>.</li>
+        <li>A search box appears, already filled in with the Karbon client name when all selected invoices share one client. Change the text to search Odoo customers by <strong>name or email</strong>.</li>
+        <li>Click the customer in the list. Customers you invoice most often are listed first.</li>
+      </ol>
+      <div class="note">Only customers that can be used by the selected Odoo company are shown. If a customer is missing, check the company drop-down, or use <strong>Create a new Odoo customer</strong>.</div>
+    </div>
+  </div>
+  <h3>Creating a new Odoo customer</h3>
+  <div class="two">
+    <figure><img src="img/11-dialog-new.png" alt="Creating a new Odoo customer"><figcaption>Type the customer name exactly as it should appear on the Odoo invoice.</figcaption></figure>
+    <div>
+      <ol class="steps">
+        <li>Choose <strong>Create a new Odoo customer and send all to it</strong>.</li>
+        <li>Type the customer name. It starts with the Karbon client name when all invoices share one client; edit it if needed.</li>
+        <li>Click <span class="ui">Create customer and send …</span>.</li>
+      </ol>
+      <div class="note warn"><strong>Check first.</strong> The customer is created in Odoo as soon as you click, before the invoices are sent. Search with <strong>Send all to an existing Odoo customer</strong> first, to avoid creating a duplicate customer.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 6. EXAMPLES ============ -->
+<section>
+  <h2><span class="num">6</span>Step-by-step examples</h2>
+
+  <h3>A. Send invoices, each to its own client (separate invoices)</h3>
+  <p>The everyday case: several clients, one Odoo invoice for each Karbon invoice.</p>
+  <ol class="steps">
+    <li>Choose the <strong>Odoo company</strong>.</li>
+    <li>Tick the invoices, for example KIN-12038 (Maple Row Bakery) and KIN-12037 (Northgate Logistics).</li>
+    <li>Click <span class="ui">Send 2 to Teak Central</span>.</li>
+    <li>Leave <strong>Match each invoice's Karbon client</strong> and <strong>One Odoo invoice per Karbon invoice</strong> selected.</li>
+    <li>Click <span class="ui">Send 2</span>. The status line shows the progress (<em>"Sending 1 of 2…"</em>) and each row shows its result.</li>
+  </ol>
+  <figure><img src="img/14-result-separate.png" alt="Results of a separate send"><figcaption>Results: KIN-12038 and KIN-12037 were created as Draft #42 and #43. KIN-12029 failed because its currency (EUR) is not active in Odoo; it stays ticked so you can try again after fixing it.</figcaption></figure>
+</section>
+
+<section>
+  <h3 style="margin-top:0">B. Several invoices for one client, combined into one Odoo invoice</h3>
+  <p>Use this when a client should receive a single Odoo invoice that covers several Karbon invoices, for example all of this month's work.</p>
+  <ol class="steps">
+    <li>Type the client's name in the filter (for example <em>harbor</em>) and tick the invoices, or click the header checkbox to tick all of them.</li>
+    <li>Click <span class="ui">Send 3 to Teak Central</span>.</li>
+    <li>Under <strong>Odoo customer</strong>, choose who is billed:
+      <ul>
+        <li><strong>Match each invoice's Karbon client</strong>, if the Odoo customer has the same name as the Karbon client, <em>or</em></li>
+        <li><strong>Send all to an existing Odoo customer</strong>, and pick the customer, <em>or</em></li>
+        <li><strong>Create a new Odoo customer</strong>, and type the name.</li>
+      </ul>
+    </li>
+    <li>Under <strong>Odoo invoices</strong>, choose <strong>Combine into one Odoo invoice</strong>. The button changes to <span class="ui">Send 3 as 1 invoice</span>.</li>
+    <li>Click it. All three rows show the same Odoo invoice.</li>
+  </ol>
+  <div class="two">
+    <figure><img src="img/10-dialog-combine.png" alt="Combine into one Odoo invoice"><figcaption>Existing customer + Combine = one Odoo invoice for all three.</figcaption></figure>
+    <div>
+      <div class="note" style="margin-top:0"><strong>Different Karbon clients?</strong> You can still combine them, but you must choose <strong>an existing</strong> or <strong>new</strong> Odoo customer; "Match each invoice's Karbon client" cannot combine invoices for different clients.</div>
+      <div class="note"><strong>In Odoo</strong> the combined invoice has one section per Karbon invoice (for example <em>KIN-12041 · 2026-11-20</em>) followed by its lines, and its reference lists all three Karbon numbers.</div>
+    </div>
+  </div>
+  <figure><div class="crop result"><img src="img/12-result-combined.png" alt="Combined result"></div><figcaption>All three Karbon invoices are now in one Odoo invoice, Draft #41, for Harbor Point Dental Group.</figcaption></figure>
+</section>
+
+<div>
+  <h3>C. Several invoices to one existing Odoo customer, kept separate</h3>
+  <p>Use this when several Karbon clients should be billed to one Odoo customer (for example, a parent company), but each Karbon invoice should stay its own Odoo invoice.</p>
+  <ol class="steps">
+    <li>Tick the invoices and click <span class="ui">Send … to …</span>.</li>
+    <li>Choose <strong>Send all to an existing Odoo customer</strong>, search, and click the customer.</li>
+    <li>Leave <strong>One Odoo invoice per Karbon invoice</strong> selected.</li>
+    <li>Click <span class="ui">Send …</span>. Each Karbon invoice becomes a separate Odoo invoice for that customer.</li>
+  </ol>
+
+  <h3>D. A single invoice to a client</h3>
+  <ol class="steps">
+    <li>Tick the one invoice and click <span class="ui">Send 1 to …</span>.</li>
+    <li>Choose the customer option you need. The <strong>Odoo invoices</strong> choice is not shown, as there is only one invoice.</li>
+    <li>Click <span class="ui">Send 1</span>.</li>
+  </ol>
+
+  <h3>E. Invoice a client that does not exist in Odoo yet</h3>
+  <p>Two ways, depending on the name you want in Odoo:</p>
+  <ul>
+    <li><strong>Same name as in Karbon:</strong> use <strong>Match each invoice's Karbon client</strong>. KarboSync creates the customer automatically with the Karbon client name.</li>
+    <li><strong>A different name:</strong> use <strong>Create a new Odoo customer and send all to it</strong> and type the name you want.</li>
+  </ul>
+  <div class="note">After the first send, the customer exists in Odoo. Next time, choose it with <strong>Send all to an existing Odoo customer</strong>, or keep using <strong>Match</strong> if the names are the same.</div>
+</div>
+
+<!-- ============ 7. ODOO ============ -->
+<section>
+  <h2><span class="num">7</span>What you will see in Odoo</h2>
+  <ul>
+    <li><strong>Draft invoices.</strong> KarboSync creates customer invoices as <strong>drafts</strong>. Review them in Odoo (<em>Accounting › Customers › Invoices</em>) and click <strong>Confirm</strong> when they are right. Until then, Odoo shows them as <em>Draft</em> and KarboSync shows <em>Draft #&lt;id&gt;</em>.</li>
+    <li><strong>Reference.</strong> The Odoo invoice's <em>Reference</em> field holds the Karbon number, for example <code>KARBON-KIN-12038</code>. A combined invoice lists every number, for example <code>KARBON-KIN-12041, KARBON-KIN-12040, KARBON-KIN-12039</code>. Search by this reference in Odoo to find an invoice.</li>
+    <li><strong>Dates.</strong> The invoice date and due date come from Karbon. A combined invoice uses the <strong>latest</strong> invoice date and the <strong>latest</strong> due date of the Karbon invoices in it.</li>
+    <li><strong>Currency.</strong> The Odoo invoice uses the Karbon invoice's currency (for example USD), even if the company's own currency is different. The currency must be active in Odoo.</li>
+    <li><strong>Lines.</strong> Each Karbon line becomes an Odoo line with the same description and amount. In a combined invoice, each Karbon invoice starts with a section heading such as <em>KIN-12041 · 2026-11-20</em>.</li>
+    <li><strong>Hours with many decimals.</strong> Odoo keeps only two decimals for quantities. When a Karbon line has hours such as 8.86874 × $95.00, KarboSync sends it as quantity 1 at the exact line amount and adds the hours and rate to the description, for example <em>"Tax return prep (8.86874 x 95.00)"</em>. This keeps every Odoo total exactly equal to Karbon.</li>
+    <li><strong>Journal.</strong> Invoices go to the company's Sales journal.</li>
+  </ul>
+
+  <h2 style="margin-top:10mm"><span class="num">8</span>Sending again and avoiding duplicates</h2>
+  <ul>
+    <li>A Karbon invoice that is already in an Odoo invoice (draft or confirmed, in any company) <strong>cannot be sent again</strong>. Its checkbox is greyed out, and KarboSync checks again at the moment of sending.</li>
+    <li>To send an invoice again, for example to correct the customer, <strong>cancel</strong> the Odoo invoice in Odoo, then click <span class="ui">Reload</span> in KarboSync. The Karbon invoice is available again.</li>
+    <li>For a combined invoice, cancelling it makes <strong>all</strong> the Karbon invoices in it available again.</li>
+    <li>If a send fails, the invoice stays ticked. Fix the cause (see Troubleshooting) and click <span class="ui">Send</span> again; invoices that were already created are not sent twice.</li>
+  </ul>
+</section>
+
+<!-- ============ 9. TROUBLESHOOTING ============ -->
+<section>
+  <h2><span class="num">9</span>Troubleshooting</h2>
+  <p>Messages appear in red on the sign-in page, in the status line, in the <em>Odoo</em> column of the invoice that failed, or at the bottom of the Send window.</p>
+  <table>
+    <thead><tr><th style="width:42%">Message</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td>Wrong Odoo username or password</td><td>Check both and try again. Use the same details as for Odoo itself. With two-factor authentication, use an Odoo API key as the password.</td></tr>
+      <tr><td>Too many failed sign-ins. Try again in 5 minute(s).</td><td>Wait 5 minutes, then sign in with the correct password.</td></tr>
+      <tr><td>Your Odoo user is not allowed to create customer invoices</td><td>Ask your Odoo administrator for invoicing rights.</td></tr>
+      <tr><td>Your session has ended, please sign in again</td><td>You were signed in for more than 8 hours, or signed out. Sign in again.</td></tr>
+      <tr><td>A company is missing from the Odoo company list</td><td>Ask your Odoo administrator to add the company to your user's <em>Allowed Companies</em>, then sign in again.</td></tr>
+      <tr><td>Currency XXX is not active in Odoo…</td><td>Ask your Odoo administrator to activate the currency (<em>Accounting › Configuration › Currencies</em>), then send the invoice again.</td></tr>
+      <tr><td>Invoices in different currencies cannot be combined</td><td>Combine only invoices in the same currency, or send them as separate invoices.</td></tr>
+      <tr><td>These are for different Karbon clients: pick an existing or new Odoo customer to combine them</td><td>To combine invoices for different clients, choose <strong>Send all to an existing Odoo customer</strong> or <strong>Create a new Odoo customer</strong>.</td></tr>
+      <tr><td>Already in Odoo, unselect them to combine the rest: …</td><td>One of the selected invoices was sent to Odoo in the meantime. Untick the invoices named in the message, or click <span class="ui">Reload</span>.</td></tr>
+      <tr><td>Invoice KIN-… is … in Karbon, only approved invoices are sent</td><td>The invoice is no longer approved in Karbon. Approve it in Karbon and click <span class="ui">Reload</span>.</td></tr>
+      <tr><td>Pick an Odoo customer / Enter the new customer name</td><td>Choose a customer from the list, or type a name, before clicking Send.</td></tr>
+      <tr><td>Odoo is unreachable…</td><td>KarboSync cannot reach Odoo. The Karbon list still shows, but nothing can be sent. Try again later and tell your administrator if it continues.</td></tr>
+      <tr><td>An approved invoice is not in the list</td><td>Click <span class="ui">Load more</span> until it appears. If it was approved a moment ago, click <span class="ui">Reload</span>. Check that <span class="ui">Hide invoices already in Odoo</span> is not hiding it.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ 10. QUICK REFERENCE ============ -->
+<section>
+  <h2><span class="num">10</span>Quick reference</h2>
+  <p>Select the invoices, click <span class="ui">Send … to …</span>, then make these choices in the window:</p>
+  <table>
+    <thead><tr><th style="width:38%">I want to…</th><th style="width:34%">Odoo customer</th><th>Odoo invoices</th></tr></thead>
+    <tbody>
+      <tr><td>Send invoices to their own clients, one Odoo invoice each</td><td>Match each invoice's Karbon client</td><td>One Odoo invoice per Karbon invoice</td></tr>
+      <tr><td>Put several invoices of one client into one Odoo invoice</td><td>Match each invoice's Karbon client <em>or</em> an existing customer</td><td>Combine into one Odoo invoice</td></tr>
+      <tr><td>Bill several clients' invoices to one Odoo customer, one invoice each</td><td>Send all to an existing Odoo customer</td><td>One Odoo invoice per Karbon invoice</td></tr>
+      <tr><td>Bill several clients' invoices to one Odoo customer, as one invoice</td><td>Send all to an existing Odoo customer</td><td>Combine into one Odoo invoice</td></tr>
+      <tr><td>Bill to a customer that is not in Odoo yet, with a different name from Karbon</td><td>Create a new Odoo customer and send all to it</td><td>Either</td></tr>
+      <tr><td>Send one invoice</td><td>Any</td><td><em>Not shown</em></td></tr>
+    </tbody>
+  </table>
+  <h3>Rules to remember</h3>
+  <ul>
+    <li>Only <strong>approved</strong> Karbon invoices are listed and sent.</li>
+    <li>Invoices arrive in Odoo as <strong>drafts</strong>: confirm them in Odoo.</li>
+    <li>A Karbon invoice can be in Odoo <strong>only once</strong>. Cancel it in Odoo to send it again.</li>
+    <li>Combining needs <strong>one currency</strong> and <strong>one customer</strong>, and at most 50 invoices.</li>
+    <li>Always check the <strong>Odoo company</strong> before sending.</li>
+    <li>Sign out on shared computers; sessions last 8 hours.</li>
+  </ul>
+  <div class="note" style="margin-top:8mm"><strong>Need help?</strong> Contact your KarboSync administrator at Teakwood Global Services, and include the invoice number and the exact message you saw.</div>
+</section>
+
+</body>
+</html>
