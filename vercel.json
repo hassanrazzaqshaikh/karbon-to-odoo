@@ -2,13 +2,11 @@
   "framework": null,
   "rewrites": [
     { "source": "/", "destination": "/api/index" },
-    { "source": "/webhooks/karbon", "destination": "/api/webhooks/karbon" },
     { "source": "/health", "destination": "/api/health" },
     { "source": "/status", "destination": "/api/status" },
     { "source": "/login", "destination": "/api/login" }
   ],
   "functions": {
-    "api/webhooks/karbon.js": { "maxDuration": 60 },
     "api/invoices.js": { "maxDuration": 30 },
     "api/push.js": { "maxDuration": 60 }
   }

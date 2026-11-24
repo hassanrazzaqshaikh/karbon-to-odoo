@@ -58,26 +58,62 @@ async function resolveCompany(odoo, companyId, { fallbackId, log }) {
 const REF_SEPARATOR = ', ';
 
 // Finds which Karbon invoices are already in a non-cancelled Odoo invoice, in any of the API user's companies,
-// including ones combined with other Karbon invoices. Returns Map(ref -> move).
+// including ones combined with other Karbon invoices. Returns Map(ref -> move), where each move also carries
+// amount: the Odoo amount for that Karbon invoice (the invoice total, or for a combined invoice the total of the lines
+// under that Karbon invoice's section), so it can be compared with the Karbon total.
 export async function findExisting(odoo, invoices) {
   const refs = invoices.map(invoiceRef);
   if (!refs.length) return new Map();
+  const context = { allowed_company_ids: (await odoo.companies()).list.map((c) => c.id) };
   // ilike finds each ref inside a combined ref field; the exact split below drops partial matches (KIN-1 in KIN-10).
   const anyRef = [...Array(refs.length - 1).fill('|'), ...refs.map((ref) => ['ref', 'ilike', ref])];
   const moves = await odoo.searchRead(
     'account.move',
     [...anyRef, ['move_type', '=', 'out_invoice'], ['state', '!=', 'cancel']],
-    ['id', 'ref', 'name', 'state', 'company_id', 'partner_id'],
-    { context: { allowed_company_ids: (await odoo.companies()).list.map((c) => c.id) } },
+    ['id', 'ref', 'name', 'state', 'company_id', 'partner_id', 'amount_total', 'currency_id'],
+    { context },
   );
+  const refsOf = (move) => String(move.ref || '').split(REF_SEPARATOR.trim()).map((part) => part.trim());
+  const sectionTotals = await combinedSectionTotals(odoo, moves.filter((move) => refsOf(move).length > 1), context);
   const wanted = new Set(refs);
   const found = new Map();
   for (const move of moves) {
-    for (const ref of String(move.ref || '').split(REF_SEPARATOR.trim()).map((part) => part.trim())) {
-      if (wanted.has(ref)) found.set(ref, move);
+    const combined = refsOf(move).length > 1;
+    for (const ref of refsOf(move)) {
+      if (!wanted.has(ref)) continue;
+      const amount = combined ? roundTo(sectionTotals.get(`${move.id}|${ref}`) ?? 0, 2) : move.amount_total;
+      found.set(ref, { ...move, amount });
     }
   }
   return found;
+}
+
+// For combined Odoo invoices: the tax-included total of the lines under each Karbon invoice's section heading
+// ("KIN-11929 · 2026-11-15"), keyed "moveId|KARBON-KIN-11929".
+async function combinedSectionTotals(odoo, moves, context) {
+  const totals = new Map();
+  if (!moves.length) return totals;
+  const lines = await odoo.searchRead(
+    'account.move.line',
+    [['move_id', 'in', moves.map((move) => move.id)], ['display_type', 'in', ['line_section', 'product']]],
+    ['move_id', 'display_type', 'name', 'price_total'],
+    { order: 'move_id, sequence, id', context },
+  );
+  let moveId = null;
+  let section = null;
+  for (const line of lines) {
+    if (line.move_id[0] !== moveId) {
+      moveId = line.move_id[0];
+      section = null;
+    }
+    if (line.display_type === 'line_section') {
+      section = `KARBON-${String(line.name || '').split('·')[0].trim()}`;
+    } else if (section) {
+      const key = `${moveId}|${section}`;
+      totals.set(key, (totals.get(key) ?? 0) + line.price_total);
+    }
+  }
+  return totals;
 }
 
 // ODOO_JOURNAL_ID only fits invoices of the journal's own company; other companies get their default sales journal.
@@ -129,7 +165,7 @@ const latest = (values) => values.filter(Boolean).sort().at(-1) ?? false;
 //   which for several invoices must be the same client.
 // - Several invoices are combined into one Odoo invoice: one section per Karbon invoice followed by its lines, dated
 //   with the latest invoice and due date. They must share a currency, and none may already be in Odoo.
-// log receives a line per step; the webhook passes one, the batch sync stays quiet.
+// log receives a line per step; the invoice picker passes one, the batch sync stays quiet.
 export async function createOdooInvoice({
   invoices,
   karbon,

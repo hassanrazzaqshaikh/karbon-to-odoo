@@ -6,7 +6,7 @@ import { KarbonClient } from './karbon.js';
 import { OdooClient } from './odoo.js';
 import { createOdooInvoice, findExisting, invoiceRef } from './sync.js';
 import { APP_NAME, BRAND_CSS, BRAND_HEAD, LOGO_SVG, TAGLINE } from './brand.js';
-import { send, versionLabel } from './webhook.js';
+import { send, versionLabel } from './http.js';
 
 const PAGE_SIZE = 100;
 const MAX_COMBINED = 50;
@@ -198,6 +198,20 @@ export async function handleCompanies(req, res) {
   });
 }
 
+// What the page shows about an Odoo invoice. amount is the Odoo amount for this Karbon invoice (see findExisting).
+function odooInfo(move) {
+  if (!move) return null;
+  return {
+    id: move.id,
+    name: move.name && move.name !== '/' ? move.name : null,
+    state: move.state,
+    company: move.company_id?.[1] ?? null,
+    partner: move.partner_id?.[1] ?? null,
+    amount: move.amount ?? null,
+    currency: move.currency_id?.[1] ?? null,
+  };
+}
+
 // GET /api/invoices?skip=N -> one page of approved Karbon invoices, each marked with its Odoo invoice if it exists.
 export async function handleInvoices(req, res) {
   if (!authorized(req, res)) return;
@@ -230,9 +244,7 @@ export async function handleInvoices(req, res) {
           client: invoice.Client?.Name ?? '',
           currency: invoice.CurrencyCode ?? '',
           total: invoice.InvoiceTotal ?? 0,
-          odoo: move
-            ? { id: move.id, name: move.name && move.name !== '/' ? move.name : null, state: move.state, company: move.company_id[1], partner: move.partner_id?.[1] ?? null }
-            : null,
+          odoo: odooInfo(move),
         };
       }),
     };
@@ -326,16 +338,18 @@ export async function handlePush(req, res) {
       invoices.push(invoice);
     }
     const result = await createOdooInvoice({ invoices, karbon, odoo, config, companyId, partnerId, log });
-    let name = null;
-    let partnerName = null;
-    if (result.id) {
-      const [move] = await odoo.searchRead('account.move', [['id', '=', result.id]], ['name', 'partner_id'], {
-        context: { allowed_company_ids: (await odoo.companies()).list.map((c) => c.id) },
-      });
-      name = move?.name && move.name !== '/' ? move.name : null;
-      partnerName = move?.partner_id?.[1] ?? null;
-    }
-    return { status: result.status, id: result.id ?? null, name, partnerName, companyName: result.companyName ?? null };
+    // Fresh Odoo details for every invoice sent, so the rows show the Odoo invoice, client and amount straight away.
+    const existing = await findExisting(odoo, invoices);
+    const odooByKey = Object.fromEntries(invoices.map((invoice) => [invoice.InvoiceKey, odooInfo(existing.get(invoiceRef(invoice)))]));
+    const first = odooByKey[invoices[0].InvoiceKey];
+    return {
+      status: result.status,
+      id: result.id ?? null,
+      name: first?.name ?? null,
+      partnerName: first?.partner ?? null,
+      companyName: result.companyName ?? null,
+      odoo: odooByKey,
+    };
   });
 }
 
@@ -368,7 +382,7 @@ const PAGE = `<!doctype html>
 ${BRAND_HEAD}
 <style>${BRAND_CSS}
   header { position: sticky; top: 0; z-index: 2; background: var(--surface); border-bottom: 3px solid var(--accent); box-shadow: 0 2px 10px rgba(81, 55, 41, 0.08); }
-  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+  .wrap { max-width: 1440px; margin: 0 auto; padding: 0 16px; }
   .bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 0; }
   .brand { margin-right: auto; }
   label { color: var(--muted); }
@@ -394,6 +408,13 @@ ${BRAND_HEAD}
   tbody tr:last-child td { border-bottom: 0; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   th { position: sticky; top: 0; background: var(--panel); font-weight: 500; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  th .sort { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; border-radius: 4px; }
+  th .sort:hover { color: var(--fg); }
+  th .sort:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  th .sort::after { content: '↕'; font-size: 11px; opacity: 0.35; }
+  th[aria-sort] .sort { color: var(--accent); }
+  th[aria-sort="ascending"] .sort::after { content: '▲'; opacity: 1; font-size: 9px; }
+  th[aria-sort="descending"] .sort::after { content: '▼'; opacity: 1; font-size: 9px; }
   td.client { white-space: normal; min-width: 200px; }
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
   tbody tr:hover { background: var(--row-hover); }
@@ -429,6 +450,28 @@ ${BRAND_HEAD}
   .partners small { color: var(--muted); }
   .partners .empty { padding: 8px 10px; color: var(--muted); }
   input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
+  .filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 12px 16px; align-items: end; padding: 2px 0 4px; }
+  .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .field > label, .field-label { font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: 0.02em; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .field input { width: 100%; min-width: 0; height: 38px; font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; }
+  .field input:focus { border-color: var(--wood); }
+  .field-action button { height: 38px; white-space: nowrap; }
+  .options .spacer { flex: 1; }
+  @media (max-width: 1100px) { .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } .field-action { justify-self: start; } }
+  @media (max-width: 640px) { .filters { grid-template-columns: minmax(0, 1fr); } }
+  .match-info { color: var(--muted); padding: 0 0 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .match-info[hidden] { display: none; }
+  .match-info .link { text-decoration: underline; font-weight: 500; }
+  :root { --diff: #fbefd9; }
+  @media (prefers-color-scheme: dark) { :root { --diff: #3a2c14; } }
+  tr.diff td { background: var(--diff); }
+  tr.diff td:first-child { box-shadow: inset 4px 0 0 var(--warn); }
+  tbody tr.diff:hover td { background: var(--diff); }
+  td.odoo-client { white-space: normal; min-width: 150px; }
+  td.client { min-width: 170px; }
+  th, td { padding-left: 8px; padding-right: 8px; }
+  .cell-sub { display: block; font-size: 12px; color: var(--muted); }
   @media (max-width: 640px) { .brand { width: 100%; } input[type=search] { min-width: 0; flex: 1; } }
 </style>
 </head>
@@ -442,12 +485,45 @@ ${BRAND_HEAD}
       <select id="company"><option value="">Loading…</option></select>
       <button id="send" class="primary" disabled>Send to Odoo</button>
     </div>
-    <div class="bar">
-      <input id="search" type="search" placeholder="Filter by number or client">
+    <div class="filters">
+      <div class="field">
+        <label for="search">Client or invoice no.</label>
+        <input id="search" type="search" placeholder="Search">
+      </div>
+      <div class="field">
+        <span class="field-label" id="dateLabel">Invoice date</span>
+        <div class="pair" role="group" aria-labelledby="dateLabel">
+          <input id="dateFrom" type="date" aria-label="Invoice date from">
+          <input id="dateTo" type="date" aria-label="Invoice date to">
+        </div>
+      </div>
+      <div class="field">
+        <span class="field-label" id="dueLabel">Due date</span>
+        <div class="pair" role="group" aria-labelledby="dueLabel">
+          <input id="dueFrom" type="date" aria-label="Due date from">
+          <input id="dueTo" type="date" aria-label="Due date to">
+        </div>
+      </div>
+      <div class="field">
+        <span class="field-label" id="amountLabel">Karbon amount</span>
+        <div class="pair" role="group" aria-labelledby="amountLabel">
+          <input id="amountMin" type="number" min="0" step="0.01" placeholder="Min" aria-label="Karbon amount from">
+          <input id="amountMax" type="number" min="0" step="0.01" placeholder="Max" aria-label="Karbon amount to">
+        </div>
+      </div>
+      <div class="field field-action">
+        <button id="clearFilters">Clear filters</button>
+      </div>
+    </div>
+    <div class="bar options">
       <label><input id="hideSent" type="checkbox" checked> Hide invoices already in Odoo</label>
+      <label><input id="diffOnly" type="checkbox"> Only amount differences</label>
+      <span class="spacer"></span>
       <button id="reload">Reload</button>
+      <button id="export">Export to Excel</button>
     </div>
     <div id="status" class="status" role="status" aria-live="polite"><span class="spinner"></span><span>Loading approved invoices from Karbon…</span></div>
+    <div id="matchInfo" class="match-info" hidden></div>
   </div>
 </header>
 <main class="wrap">
@@ -455,9 +531,16 @@ ${BRAND_HEAD}
     <table>
       <thead><tr>
         <th><input id="all" type="checkbox" aria-label="Select all shown"></th>
-        <th>Invoice</th><th>Date</th><th>Due</th><th>Client</th><th class="num">Total</th><th>Odoo</th>
+        <th data-sort="number"><button class="sort" type="button">Invoice</button></th>
+        <th data-sort="date"><button class="sort" type="button">Date</button></th>
+        <th data-sort="due"><button class="sort" type="button">Due</button></th>
+        <th data-sort="client"><button class="sort" type="button">Client</button></th>
+        <th data-sort="karbonAmount" class="num"><button class="sort" type="button">Karbon amount</button></th>
+        <th data-sort="odooAmount" class="num"><button class="sort" type="button">Odoo amount</button></th>
+        <th data-sort="odooInvoice"><button class="sort" type="button">Odoo invoice</button></th>
+        <th data-sort="odooClient"><button class="sort" type="button">Odoo client</button></th>
       </tr></thead>
-      <tbody id="rows"><tr class="loading-row"><td colspan="7"><span class="inner"><span class="spinner big"></span>Loading approved invoices from Karbon…</span></td></tr></tbody>
+      <tbody id="rows"><tr class="loading-row"><td colspan="9"><span class="inner"><span class="spinner big"></span>Loading approved invoices from Karbon…</span></td></tr></tbody>
     </table>
   </div>
   <div class="more"><button id="more" hidden>Load more</button></div>
@@ -501,7 +584,7 @@ ${BRAND_HEAD}
 </dialog>
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { invoices: [], selected: new Set(), results: new Map(), skip: 0, total: null, hasMore: false, odooUrl: '', busy: false, loading: null };
+const state = { invoices: [], selected: new Set(), results: new Map(), skip: 0, total: null, hasMore: false, odooUrl: '', busy: false, loading: null, loadingAll: false, sort: null };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const money = (n, cur) => { try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur || 'USD' }).format(n); } catch { return (cur + ' ' + n).trim(); } };
@@ -523,44 +606,137 @@ function setStatus(text, isError, spinner) {
 
 const inOdoo = (inv) => inv.odoo || ['created', 'exists'].includes(state.results.get(inv.key)?.status);
 
+// The Odoo amount no longer matches Karbon, e.g. the invoice was changed in Karbon after it was sent.
+const amountDiffers = (inv) => Boolean(inv.odoo && inv.odoo.amount != null &&
+  ((inv.odoo.currency && inv.currency && inv.odoo.currency !== inv.currency) || Math.abs(inv.odoo.amount - inv.total) >= 0.005));
+
+function filters() {
+  const num = (id) => ($(id).value === '' ? null : Number($(id).value));
+  return {
+    q: $('search').value.trim().toLowerCase(),
+    dateFrom: $('dateFrom').value, dateTo: $('dateTo').value,
+    dueFrom: $('dueFrom').value, dueTo: $('dueTo').value,
+    amountMin: num('amountMin'), amountMax: num('amountMax'),
+    diffOnly: $('diffOnly').checked,
+  };
+}
+const filtersActive = (f) => Boolean(f.q || f.dateFrom || f.dateTo || f.dueFrom || f.dueTo || f.amountMin != null || f.amountMax != null || f.diffOnly);
+
+// What each sortable column sorts by. Missing values (e.g. no Odoo invoice yet) always go last.
+const SORT_VALUES = {
+  number: (inv) => inv.number,
+  date: (inv) => inv.date,
+  due: (inv) => inv.dueDate,
+  client: (inv) => inv.client,
+  karbonAmount: (inv) => inv.total,
+  odooAmount: (inv) => inv.odoo?.amount,
+  odooInvoice: (inv) => (inv.odoo ? inv.odoo.name || 'Draft #' + inv.odoo.id : null),
+  odooClient: (inv) => inv.odoo?.partner,
+};
+
+function sortRows(rows) {
+  if (!state.sort) return rows;
+  const value = SORT_VALUES[state.sort.key];
+  const dir = state.sort.dir === 'desc' ? -1 : 1;
+  const order = new Map(state.invoices.map((inv, i) => [inv, i]));
+  return [...rows].sort((a, b) => {
+    const x = value(a);
+    const y = value(b);
+    const xMissing = x === null || x === undefined || x === '';
+    const yMissing = y === null || y === undefined || y === '';
+    if (xMissing || yMissing) return xMissing === yMissing ? order.get(a) - order.get(b) : xMissing ? 1 : -1;
+    const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: 'base' });
+    return c ? c * dir : order.get(a) - order.get(b);
+  });
+}
+
+// First click sorts ascending, the next click on the same column descending, and so on.
+function toggleSort(key) {
+  state.sort = state.sort?.key === key && state.sort.dir === 'asc' ? { key, dir: 'desc' } : { key, dir: 'asc' };
+  render();
+}
+
+function renderSortHeaders() {
+  for (const th of document.querySelectorAll('th[data-sort]')) {
+    if (state.sort?.key === th.dataset.sort) th.setAttribute('aria-sort', state.sort.dir === 'desc' ? 'descending' : 'ascending');
+    else th.removeAttribute('aria-sort');
+  }
+}
+
 function visible() {
-  const q = $('search').value.trim().toLowerCase();
-  return state.invoices.filter((inv) =>
-    (!$('hideSent').checked || !inv.odoo) &&
-    (!q || inv.number.toLowerCase().includes(q) || inv.client.toLowerCase().includes(q)));
+  return sortRows(filtered());
+}
+
+function filtered() {
+  const f = filters();
+  return state.invoices.filter((inv) => {
+    // "Only amount differences" shows invoices in Odoo, so it overrides "Hide invoices already in Odoo".
+    if (f.diffOnly) { if (!amountDiffers(inv)) return false; }
+    else if ($('hideSent').checked && inv.odoo && !state.results.has(inv.key)) return false;
+    if (f.q && ![inv.number, inv.client, inv.odoo?.partner].some((v) => String(v || '').toLowerCase().includes(f.q))) return false;
+    if (f.dateFrom && !(inv.date >= f.dateFrom)) return false;
+    if (f.dateTo && !(inv.date <= f.dateTo)) return false;
+    if (f.dueFrom && !(inv.dueDate >= f.dueFrom)) return false;
+    if (f.dueTo && !(inv.dueDate <= f.dueTo)) return false;
+    if (f.amountMin != null && inv.total < f.amountMin) return false;
+    if (f.amountMax != null && inv.total > f.amountMax) return false;
+    return true;
+  });
 }
 
 function odooCell(inv) {
   const r = state.results.get(inv.key);
   if (r?.status === 'sending') return '<span class="warn">Sending…</span>';
-  if (r?.status === 'created') return '<span class="ok">Created</span> ' + odooLink(r.id, r.name || 'Draft #' + r.id) + (r.partnerName ? ' · ' + esc(r.partnerName) : '');
-  if (r?.status === 'exists') return '<span class="warn">Already in ' + esc(r.companyName || 'Odoo') + '</span> ' + odooLink(r.id, '#' + r.id);
   if (r?.status === 'failed') return '<span class="bad">' + esc(r.error) + '</span>';
-  if (inv.odoo) return odooLink(inv.odoo.id, inv.odoo.name || 'Draft #' + inv.odoo.id) + ' · ' + esc(inv.odoo.company) + (inv.odoo.partner ? ' · ' + esc(inv.odoo.partner) : '');
+  const badge = r?.status === 'created' ? '<span class="ok">Created</span> ' : r?.status === 'exists' ? '<span class="warn">Already in Odoo</span> ' : '';
+  const o = inv.odoo;
+  if (o) return badge + odooLink(o.id, o.name || 'Draft #' + o.id) + (o.company ? '<span class="cell-sub">' + esc(o.company) + '</span>' : '');
+  if (r?.id) return badge + odooLink(r.id, r.name || 'Draft #' + r.id);
   return '';
+}
+
+function odooAmountCell(inv) {
+  const o = inv.odoo;
+  if (!o || o.amount == null) return '';
+  return esc(money(o.amount, o.currency || inv.currency));
+}
+
+const odooClientCell = (inv) => esc(inv.odoo?.partner || state.results.get(inv.key)?.partnerName || '');
+
+// Puts the Odoo details returned after a send onto the rows, so they show the Odoo invoice, amount and client.
+function applyOdoo(byKey) {
+  for (const [key, info] of Object.entries(byKey || {})) {
+    const inv = state.invoices.find((i) => i.key === key);
+    if (inv && info) inv.odoo = info;
+  }
 }
 
 function render() {
   const rows = visible();
   $('table').classList.toggle('reloading', state.loading === 'reload' && state.invoices.length > 0);
   if (state.loading === 'reload' && !state.invoices.length) {
-    $('rows').innerHTML = '<tr class="loading-row"><td colspan="7"><span class="inner"><span class="spinner big"></span>Loading approved invoices from Karbon…</span></td></tr>';
+    $('rows').innerHTML = '<tr class="loading-row"><td colspan="9"><span class="inner"><span class="spinner big"></span>Loading approved invoices from Karbon…</span></td></tr>';
   } else $('rows').innerHTML = rows.map((inv) => {
     const done = inOdoo(inv);
-    return '<tr class="' + (done ? 'done' : '') + '">' +
+    const diff = amountDiffers(inv);
+    return '<tr class="' + [done && !diff ? 'done' : '', diff ? 'diff' : ''].join(' ').trim() + '"' + (diff ? ' title="The Odoo amount is different from Karbon"' : '') + '>' +
       '<td><input type="checkbox" data-key="' + esc(inv.key) + '"' + (state.selected.has(inv.key) ? ' checked' : '') + (done || state.busy ? ' disabled' : '') + ' aria-label="Select ' + esc(inv.number) + '"></td>' +
       '<td>' + esc(inv.number) + '</td><td>' + esc(inv.date) + '</td><td>' + esc(inv.dueDate) + '</td>' +
       '<td class="client">' + esc(inv.client) + '</td><td class="num">' + esc(money(inv.total, inv.currency)) + '</td>' +
-      '<td>' + odooCell(inv) + '</td></tr>';
-  }).join('') || '<tr><td colspan="7" style="color:var(--muted)">No invoices to show.</td></tr>';
+      '<td class="num">' + odooAmountCell(inv) + '</td>' +
+      '<td>' + odooCell(inv) + '</td><td class="odoo-client">' + odooClientCell(inv) + '</td></tr>';
+  }).join('') || '<tr><td colspan="9" style="color:var(--muted)">No invoices to show.</td></tr>';
 
   const selectable = rows.filter((inv) => !inOdoo(inv));
   $('all').checked = selectable.length > 0 && selectable.every((inv) => state.selected.has(inv.key));
   $('all').disabled = state.busy || !selectable.length;
+  renderMatchInfo(rows);
+  renderSortHeaders();
   $('more').hidden = !state.hasMore;
   $('more').disabled = state.busy;
   $('more').innerHTML = state.loading === 'more' ? '<span class="spinner"></span>Loading more…' : 'Load more';
   $('reload').disabled = state.busy;
+  $('export').disabled = state.busy || !rows.length;
   $('company').disabled = state.busy;
   const n = state.selected.size;
   const company = $('company').selectedOptions[0];
@@ -570,7 +746,38 @@ function render() {
 
 function loadedSummary() {
   const pending = state.invoices.filter((inv) => !inv.odoo).length;
-  return 'Showing ' + state.invoices.length + (state.total != null ? ' of ' + state.total : '') + ' approved invoices · ' + pending + ' not yet in Odoo';
+  const diffs = state.invoices.filter(amountDiffers).length;
+  return 'Showing ' + state.invoices.length + (state.total != null ? ' of ' + state.total : '') + ' approved invoices · ' + pending + ' not yet in Odoo' +
+    (diffs ? ' · ' + diffs + ' with a different amount in Odoo' : '');
+}
+
+// Under the status line while filters are on: how many match, and a way to search all invoices, not just those loaded.
+function renderMatchInfo(rows) {
+  const box = $('matchInfo');
+  if (!filtersActive(filters()) || state.loading === 'reload') { box.hidden = true; return; }
+  box.hidden = false;
+  let html = '<span>' + rows.length + (rows.length === 1 ? ' invoice matches' : ' invoices match') + ' the filters</span>';
+  if (state.hasMore) {
+    html += '<span>· only the ' + state.invoices.length + ' loaded invoices were searched</span>' +
+      '<button id="loadAll" class="link"' + (state.busy ? ' disabled' : '') + '>Load all ' + (state.total ?? '') + ' to search everything</button>';
+  }
+  box.innerHTML = html;
+}
+
+async function loadAll() {
+  state.loadingAll = true;
+  while (state.hasMore && state.loadingAll) {
+    // A page can fail on a passing network error; try it once more before giving up.
+    if (!(await loadInvoices({ append: true })) && !(await loadInvoices({ append: true }))) break;
+  }
+  state.loadingAll = false;
+  render();
+}
+
+function clearFilters() {
+  for (const id of ['search', 'dateFrom', 'dateTo', 'dueFrom', 'dueTo', 'amountMin', 'amountMax']) $(id).value = '';
+  $('diffOnly').checked = false;
+  render();
 }
 
 async function loadCompanies() {
@@ -585,8 +792,10 @@ async function loadCompanies() {
 async function loadInvoices({ append }) {
   state.busy = true;
   state.loading = append ? 'more' : 'reload';
-  setStatus(append ? 'Loading more invoices…' : 'Loading approved invoices from Karbon…', false, true);
+  setStatus(state.loadingAll ? 'Loading all invoices… ' + state.invoices.length + (state.total != null ? ' of ' + state.total : '') :
+    append ? 'Loading more invoices…' : 'Loading approved invoices from Karbon…', false, true);
   render();
+  let ok = false;
   try {
     const skip = append ? state.skip : 0;
     const page = await api('api/invoices?skip=' + skip);
@@ -598,6 +807,7 @@ async function loadInvoices({ append }) {
     state.odooUrl = page.odooUrl;
     if (page.odooError) setStatus('Odoo is unreachable (' + page.odooError + '), so invoices already in Odoo cannot be marked. Check ODOO_URL.', true);
     else setStatus(loadedSummary());
+    ok = true;
   } catch (err) {
     setStatus('Could not load invoices: ' + err.message, true);
   } finally {
@@ -605,6 +815,7 @@ async function loadInvoices({ append }) {
     state.loading = null;
     render();
   }
+  return ok;
 }
 
 const selectedInvoices = () => state.invoices.filter((inv) => state.selected.has(inv.key));
@@ -712,6 +923,7 @@ async function sendCombined(partner) {
   render();
   try {
     const r = await pushRequest(keys, companyId, partner);
+    applyOdoo(r.odoo);
     for (const key of keys) { state.results.set(key, r); state.selected.delete(key); }
     setStatus('Done: ' + keys.length + ' Karbon invoices combined into one Odoo invoice in ' + companyName + (r.partnerName ? ' for ' + r.partnerName : '') + '.');
   } catch (err) {
@@ -736,6 +948,7 @@ async function sendSelected(partner) {
     render();
     try {
       const r = await pushRequest([key], companyId, partner);
+      applyOdoo(r.odoo);
       state.results.set(key, r);
       counts[r.status === 'exists' ? 'exists' : 'created']++;
     } catch (err) {
@@ -749,6 +962,128 @@ async function sendSelected(partner) {
   render();
 }
 
+// ---- Export to Excel: a real .xlsx (an uncompressed ZIP of SpreadsheetML files) built in the browser ----
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(bytes) { let c = 0xFFFFFFFF; for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+
+function zipFiles(files) {
+  const enc = new TextEncoder();
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  for (const [name, text] of files) {
+    const nameBytes = enc.encode(name);
+    const data = enc.encode(text);
+    const crc = crc32(data);
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true); local.setUint16(4, 20, true); local.setUint16(6, 0x0800, true);
+    local.setUint16(12, 0x21, true); // 1980-01-01
+    local.setUint32(14, crc, true); local.setUint32(18, data.length, true); local.setUint32(22, data.length, true);
+    local.setUint16(26, nameBytes.length, true);
+    parts.push(new Uint8Array(local.buffer), nameBytes, data);
+    const entry = new DataView(new ArrayBuffer(46));
+    entry.setUint32(0, 0x02014b50, true); entry.setUint16(4, 20, true); entry.setUint16(6, 20, true); entry.setUint16(8, 0x0800, true);
+    entry.setUint16(14, 0x21, true);
+    entry.setUint32(16, crc, true); entry.setUint32(20, data.length, true); entry.setUint32(24, data.length, true);
+    entry.setUint16(28, nameBytes.length, true); entry.setUint32(42, offset, true);
+    central.push(new Uint8Array(entry.buffer), nameBytes);
+    offset += 30 + nameBytes.length + data.length;
+  }
+  const size = central.reduce((n, c) => n + c.length, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+  end.setUint32(12, size, true); end.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
+function xmlText(value) {
+  let s = '';
+  for (const ch of String(value ?? '')) { const c = ch.charCodeAt(0); if (c >= 32 || c === 9 || c === 10 || c === 13) s += ch; }
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+const excelDate = (iso) => (iso ? (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 86400000 : null);
+
+function buildXlsx(rows) {
+  const cols = [
+    ['Invoice', 'text', 12], ['Invoice date', 'date', 13], ['Due date', 'date', 13], ['Client', 'text', 36], ['Currency', 'text', 10],
+    ['Karbon amount', 'money', 15], ['Odoo amount', 'money', 15], ['Difference', 'money', 13], ['Odoo invoice', 'text', 18],
+    ['Odoo status', 'text', 12], ['Odoo company', 'text', 20], ['Odoo client', 'text', 36],
+  ];
+  const letter = (i) => String.fromCharCode(65 + i);
+  const styleOf = { text: 2, date: 3, money: 4 }; // highlighted rows use the same style + 3
+  const cell = (ref, kind, value, s) => {
+    if (value === null || value === undefined || value === '') return '<c r="' + ref + '" s="' + s + '"/>';
+    if (kind === 'text') return '<c r="' + ref + '" s="' + s + '" t="inlineStr"><is><t xml:space="preserve">' + xmlText(value) + '</t></is></c>';
+    return '<c r="' + ref + '" s="' + s + '"><v>' + value + '</v></c>';
+  };
+  let data = '<row r="1">' + cols.map(([title], i) => '<c r="' + letter(i) + '1" s="1" t="inlineStr"><is><t>' + xmlText(title) + '</t></is></c>').join('') + '</row>';
+  rows.forEach((inv, n) => {
+    const r = n + 2;
+    const o = inv.odoo;
+    const shade = amountDiffers(inv) ? 3 : 0;
+    const values = [
+      inv.number, excelDate(inv.date), excelDate(inv.dueDate), inv.client, inv.currency, inv.total,
+      o?.amount ?? null, o && o.amount != null ? Math.round((o.amount - inv.total) * 100) / 100 : null,
+      o ? o.name || 'Draft #' + o.id : '', o ? ({ draft: 'Draft', posted: 'Posted' })[o.state] || o.state : '', o?.company || '', o?.partner || '',
+    ];
+    data += '<row r="' + r + '">' + values.map((v, i) => cell(letter(i) + r, cols[i][1], v, styleOf[cols[i][1]] + shade)).join('') + '</row>';
+  });
+  const lastCol = letter(cols.length - 1);
+  const lastRow = rows.length + 1;
+  const ns = 'http://schemas.openxmlformats.org';
+  const head = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  const sheet = head + '<worksheet xmlns="' + ns + '/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
+    '<cols>' + cols.map(([, , w], i) => '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>').join('') + '</cols>' +
+    '<sheetData>' + data + '</sheetData><autoFilter ref="A1:' + lastCol + lastRow + '"/></worksheet>';
+  const xf = (fmt, font, fill) => '<xf numFmtId="' + fmt + '" fontId="' + font + '" fillId="' + fill + '" borderId="0" xfId="0"' +
+    (fmt ? ' applyNumberFormat="1"' : '') + (font ? ' applyFont="1"' : '') + (fill ? ' applyFill="1"' : '') + '/>';
+  const solid = (rgb) => '<fill><patternFill patternType="solid"><fgColor rgb="' + rgb + '"/><bgColor indexed="64"/></patternFill></fill>';
+  const styles = head + '<styleSheet xmlns="' + ns + '/spreadsheetml/2006/main">' +
+    '<numFmts count="2"><numFmt numFmtId="164" formatCode="#,##0.00"/><numFmt numFmtId="165" formatCode="yyyy-mm-dd"/></numFmts>' +
+    '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>' +
+    '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>' + solid('FF513729') + solid('FFFBEFD9') + '</fills>' +
+    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="8">' + xf(0, 0, 0) + xf(0, 1, 2) + xf(0, 0, 0) + xf(165, 0, 0) + xf(164, 0, 0) + xf(0, 0, 3) + xf(165, 0, 3) + xf(164, 0, 3) + '</cellXfs>' +
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+  const dollar = String.fromCharCode(36);
+  const filterRange = 'Invoices!' + dollar + 'A' + dollar + '1:' + dollar + lastCol + dollar + lastRow;
+  const workbook = head + '<workbook xmlns="' + ns + '/spreadsheetml/2006/main" xmlns:r="' + ns + '/officeDocument/2006/relationships">' +
+    '<sheets><sheet name="Invoices" sheetId="1" r:id="rId1"/></sheets>' +
+    '<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">' + filterRange + '</definedName></definedNames></workbook>';
+  const rel = (id, type, target) => '<Relationship Id="' + id + '" Type="' + ns + '/officeDocument/2006/relationships/' + type + '" Target="' + target + '"/>';
+  return zipFiles([
+    ['[Content_Types].xml', head + '<Types xmlns="' + ns + '/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+      '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+      '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
+    ['_rels/.rels', head + '<Relationships xmlns="' + ns + '/package/2006/relationships">' + rel('rId1', 'officeDocument', 'xl/workbook.xml') + '</Relationships>'],
+    ['xl/workbook.xml', workbook],
+    ['xl/_rels/workbook.xml.rels', head + '<Relationships xmlns="' + ns + '/package/2006/relationships">' + rel('rId1', 'worksheet', 'worksheets/sheet1.xml') + rel('rId2', 'styles', 'styles.xml') + '</Relationships>'],
+    ['xl/worksheets/sheet1.xml', sheet],
+    ['xl/styles.xml', styles],
+  ]);
+}
+
+// Exports the rows currently shown, so the filters decide what goes into the file.
+function exportExcel() {
+  const rows = visible();
+  if (!rows.length) { setStatus('Nothing to export: no invoices are shown.', true); return; }
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(buildXlsx(rows));
+  link.download = 'KarboSync-invoices-' + new Date().toISOString().slice(0, 10) + '.xlsx';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 2000);
+  setStatus('Exported ' + rows.length + ' invoice' + (rows.length === 1 ? '' : 's') + ' to Excel' +
+    (state.hasMore ? ', from the ' + state.invoices.length + ' loaded. Use Load all first to export from every approved invoice.' : '.'));
+}
+
 $('rows').addEventListener('change', (e) => {
   const key = e.target.dataset.key;
   if (!key) return;
@@ -759,8 +1094,12 @@ $('all').addEventListener('change', (e) => {
   for (const inv of visible()) if (!inOdoo(inv)) e.target.checked ? state.selected.add(inv.key) : state.selected.delete(inv.key);
   render();
 });
-$('search').addEventListener('input', render);
+for (const id of ['search', 'dateFrom', 'dateTo', 'dueFrom', 'dueTo', 'amountMin', 'amountMax']) $(id).addEventListener('input', render);
 $('hideSent').addEventListener('change', render);
+$('diffOnly').addEventListener('change', render);
+$('clearFilters').addEventListener('click', clearFilters);
+$('export').addEventListener('click', exportExcel);
+$('matchInfo').addEventListener('click', (e) => { if (e.target.id === 'loadAll') loadAll(); });
 $('company').addEventListener('change', render);
 $('send').addEventListener('click', openSendDialog);
 $('sendForm').addEventListener('change', (e) => { if (e.target.name === 'mode' || e.target.name === 'split') updateDialog(); });
@@ -770,6 +1109,11 @@ $('partnerSearch').addEventListener('input', () => { clearTimeout(partnerTimer);
 $('more').addEventListener('click', () => loadInvoices({ append: true }));
 $('reload').addEventListener('click', () => loadInvoices({ append: false }));
 $('logout').addEventListener('click', async () => { await fetch('api/logout', { method: 'POST' }); location.href = '/login'; });
+
+document.querySelector('thead').addEventListener('click', (e) => {
+  const th = e.target.closest('th[data-sort]');
+  if (th && e.target.closest('.sort')) toggleSort(th.dataset.sort);
+});
 
 loadCompanies().catch((err) => { $('company').innerHTML = '<option value="">Unavailable</option>'; setStatus('Could not load Odoo companies: ' + err.message, true); }).finally(render);
 loadInvoices({ append: false });

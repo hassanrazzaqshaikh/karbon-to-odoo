@@ -5,7 +5,7 @@ Pulls invoices from the Karbon v3 API and creates them as customer invoices (`ac
 
 ## Setup
 
-Requires Node.js 22.
+Requires Node.js 24.
 
 ```bash
 npm install
@@ -36,6 +36,12 @@ combine them into one Odoo invoice: each Karbon invoice becomes a section follow
 lists all their numbers, and it is dated with the latest invoice and due date. Combining needs one customer and one
 currency. Invoices are created as drafts in Odoo.
 
+The list shows the Karbon amount next to the Odoo amount, plus the Odoo invoice and Odoo client. A row is highlighted
+when the two amounts differ, for example when the invoice was changed in Karbon after it was sent (for a combined
+Odoo invoice, the lines under that Karbon invoice's section are compared). Filters narrow the list by client or invoice
+number, invoice date, due date, amount, or amount differences only; they search the invoices loaded on the page, and
+"Load all" fetches every approved invoice so the filters search everything.
+
 - The company list comes from Odoo: the API user's Allowed Companies. Add a company there to make it selectable.
 - Sign in with an Odoo username and password from the `ODOO_DB` database (an Odoo API key also works, and is
   required for users with two-factor authentication). Only users allowed to create customer invoices can sign in,
@@ -44,50 +50,17 @@ currency. Invoices are created as drafts in Odoo.
   used. After 5 failed sign-ins a username is locked for 5 minutes.
 - Invoices are still created through the API user (`ODOO_USERNAME`), so in Odoo they show that user as the
   creator. The app's logs record which signed-in user sent each one.
-- The CLI sync and the webhook have no company picker: they use `ODOO_COMPANY_ID`, else the API user's default
-  company. Leave `WEBHOOK_SYNC_TO_ODOO` off if every invoice should go through the picker.
+- The CLI sync (`npm run sync`) has no company picker: it uses `ODOO_COMPANY_ID`, else the API user's default
+  company.
 - `ODOO_JOURNAL_ID` only applies to invoices in that journal's company; other companies use their default sales journal.
-- The old status page is now at `/status`.
+- `/status` shows whether the Karbon, Odoo and sign-in settings are present; `/health` returns the version.
 
-## Webhook receiver (Karbon -> this server)
+## Deploying to Vercel
 
-Karbon POSTs to `/webhooks/karbon` whenever an invoice is created or changed. The server verifies the
-`Signature` header (HMAC-SHA256 of the raw body with `KARBON_WEBHOOK_SIGNING_KEY`), replies `200`,
-then fetches the full invoice from Karbon and logs it to the console and `logs/webhook-events.jsonl`.
-Set `WEBHOOK_SYNC_TO_ODOO=true` to also create the invoice in Odoo.
+`api/` holds the Vercel functions and `vercel.json` maps `/`, `/login`, `/status` and `/health` to them.
 
-```bash
-npm start         # terminal 1: listens on http://localhost:3000
-npm run tunnel    # terminal 2: prints a public https://xxxx.trycloudflare.com URL
-```
-
-Then subscribe in Karbon (e.g. from Postman):
-
-```
-POST https://api.karbonhq.com/v3/WebhookSubscriptions
-Authorization: Bearer <KARBON_BEARER_TOKEN>
-AccessKey: <KARBON_ACCESS_KEY>
-Content-Type: application/json
-
-{
-  "WebhookType": "Invoice",
-  "TargetUrl": "https://xxxx.trycloudflare.com/webhooks/karbon",
-  "SigningKey": "<same value as KARBON_WEBHOOK_SIGNING_KEY>"
-}
-```
-
-Karbon allows one subscription per type; check with `GET /v3/WebhookSubscriptions/Invoice` and remove with
-`DELETE /v3/WebhookSubscriptions/Invoice`. A quick tunnel URL changes every time `npm run tunnel` restarts,
-so re-subscribe when it does. Karbon cancels the subscription after 10 consecutive failed deliveries.
-
-## Deploying the webhook receiver to Vercel
-
-`api/` holds the Vercel functions and `vercel.json` maps `/webhooks/karbon` and `/health` to them, so the
-Karbon `TargetUrl` is `https://<your-project>.vercel.app/webhooks/karbon`.
-
-`.env` is not deployed: add `KARBON_ACCESS_KEY`, `KARBON_BEARER_TOKEN`, `KARBON_WEBHOOK_SIGNING_KEY`,
-`WEBHOOK_SYNC_TO_ODOO`, `SESSION_SECRET` and the `ODOO_*` vars under Project Settings > Environment Variables,
-then redeploy. On Vercel events are written to the function logs only, not `logs/webhook-events.jsonl`.
+`.env` is not deployed: add `KARBON_ACCESS_KEY`, `KARBON_BEARER_TOKEN`, `SESSION_SECRET` and the `ODOO_*` vars
+under Project Settings > Environment Variables, then redeploy.
 
 ## Version number
 

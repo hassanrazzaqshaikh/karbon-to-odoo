@@ -9,18 +9,13 @@
     "sync": "node src/index.js",
     "dry-run": "node src/index.js --dry-run",
     "check": "node src/check.js",
-    "server": "node src/server.js",
-    "tunnel": "cloudflared tunnel --url http://localhost:3000"
+    "server": "node src/server.js"
   },
   "engines": {
     "node": "24.x"
   },
   "license": "MIT",
   "dependencies": {
-    "@vercel/functions": "^3.9.9",
     "dotenv": "^16.4.5"
-  },
-  "devDependencies": {
-    "cloudflared": "^0.7.3"
   }
 }
