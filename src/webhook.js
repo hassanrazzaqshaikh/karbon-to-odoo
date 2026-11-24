@@ -8,6 +8,7 @@ import { loadConfig, requireOdooConfig } from './config.js';
 import { KarbonClient } from './karbon.js';
 import { OdooClient } from './odoo.js';
 import { syncInvoice } from './sync.js';
+import { APP_NAME, BRAND_CSS, BRAND_HEAD, LOGO_SVG } from './brand.js';
 import { VERSION } from './version.js';
 
 export const WEBHOOK_PATH = '/webhooks/karbon';
@@ -134,7 +135,7 @@ export function handleHealth(req, res) {
   send(res, 200, { ok: true, version: VERSION, commit: commit ?? null });
 }
 
-// Status page for GET /. Only shows whether settings are present, never their values.
+// Status page for GET /status. Only shows whether settings are present, never their values.
 export function handleIndex(req, res) {
   console.log(`[index] ${req.method} ${req.url}`);
   const karbonReady = Boolean(process.env.KARBON_ACCESS_KEY && process.env.KARBON_BEARER_TOKEN);
@@ -148,19 +149,22 @@ export function handleIndex(req, res) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Karbon to Odoo</title>
-<style>
-  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 48px auto; padding: 0 16px; color: #1f2328; }
-  h1 { font-size: 1.5rem; }
+<title>Status · ${APP_NAME}</title>
+${BRAND_HEAD}
+<style>${BRAND_CSS}
+  body { max-width: 640px; margin: 48px auto; padding: 0 16px; }
+  h1 { margin: 0 0 16px; }
+  a { color: var(--accent); }
   table { border-collapse: collapse; width: 100%; }
-  td { padding: 8px 0; border-bottom: 1px solid #d0d7de; }
-  .ok { color: #1a7f37; } .warn { color: #9a6700; }
-  .version { color: #59636e; font-size: 0.875rem; margin-top: 24px; }
-  code { background: #f6f8fa; padding: 2px 6px; border-radius: 4px; }
+  td { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .ok { color: var(--ok); } .warn { color: var(--warn); }
+  .version { color: var(--muted); font-size: 0.875rem; margin-top: 24px; }
+  code { background: var(--panel); padding: 2px 6px; border-radius: 4px; }
 </style>
 </head>
 <body>
-<h1>Karbon to Odoo</h1>
+<h1 class="brand">${LOGO_SVG}<span class="brand-name">${APP_NAME}</span></h1>
+<p><a href="/">Open the invoice picker</a></p>
 <p>Webhook receiver is running. Karbon should POST invoice events to <code>${WEBHOOK_PATH}</code>.</p>
 <table>
   ${row('Karbon API credentials', karbonReady, karbonReady ? 'Set' : 'Missing (KARBON_ACCESS_KEY, KARBON_BEARER_TOKEN)')}

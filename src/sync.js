@@ -1,5 +1,6 @@
 // Maps Karbon invoices to Odoo customer invoices (account.move, move_type=out_invoice).
-// Idempotent: an invoice is skipped if an Odoo move with ref = Karbon invoice number already exists.
+// Idempotent: an invoice is skipped if an Odoo move with ref = Karbon invoice number already exists and is not cancelled.
+// A cancelled one doesn't count, so the invoice can be sent again.
 
 const toDate = (value) => (value ? String(value).slice(0, 10) : false);
 
@@ -7,57 +8,76 @@ function clientName(invoice) {
   return invoice.Client?.Name || invoice.ClientName || invoice.EntityName || 'Unknown Karbon Client';
 }
 
-function invoiceRef(invoice) {
+export function invoiceRef(invoice) {
   return `KARBON-${invoice.InvoiceNumber ?? invoice.InvoiceKey}`;
 }
 
-function mapLines(invoice, { productId }) {
+const roundTo = (value, digits) => Math.round(value * 10 ** digits) / 10 ** digits;
+
+// Odoo rounds each line's quantity and unit price to its decimal precision, so a Karbon line of 8.86874 h x 95 = 842.53
+// would become 8.87 x 95 = 842.65. A line is kept as quantity x price only when that survives Odoo's rounding;
+// otherwise it is sent as 1 x the exact Karbon amount, with the original quantity and rate in the description.
+function mapLines(invoice, { productId }, { quantityDigits, priceDigits }) {
   const lines = invoice.LineItems ?? [];
   if (!lines.length) {
     // Fall back to a single line for the invoice total so nothing is silently dropped.
     return [{ name: `Karbon invoice ${invoice.InvoiceNumber ?? ''}`.trim(), quantity: 1, price_unit: invoice.InvoiceTotal ?? invoice.Amount ?? 0 }];
   }
   return lines.map((line) => {
+    const name = line.Description || line.Name || 'Karbon service';
     const quantity = Number(line.Quantity ?? 1) || 1;
     const amount = line.Amount ?? line.Total;
     // Amount is the line total Karbon bills; UnitPrice can be 0 on fixed-fee lines, so derive the price from Amount.
     const priceUnit = amount != null ? Number(amount) / quantity : Number(line.UnitPrice ?? line.Rate ?? 0);
+    const total = roundTo(amount != null ? Number(amount) : quantity * priceUnit, priceDigits);
+    const odooQuantity = roundTo(quantity, quantityDigits);
+    const odooPrice = roundTo(priceUnit, priceDigits);
+    const exact = roundTo(odooQuantity * odooPrice, priceDigits) === total;
     return {
-      name: line.Description || line.Name || 'Karbon service',
-      quantity,
-      price_unit: Number(priceUnit),
+      ...(exact
+        ? { name, quantity: odooQuantity, price_unit: odooPrice }
+        : { name: `${name} (${quantity} x ${priceUnit.toFixed(priceDigits)})`, quantity: 1, price_unit: total }),
       ...(productId ? { product_id: productId } : {}),
     };
   });
 }
 
-// Where the Odoo company for an invoice comes from. The Karbon invoice itself has no company field, so fill this in
-// from the Karbon call that knows it (e.g. the client's details). Returning undefined falls back to ODOO_COMPANY_ID.
-async function karbonCompanyName(invoice, karbon) {
-  return undefined;
+// The company picked in the UI, else ODOO_COMPANY_ID, else the API user's default company.
+// It must be one of the API user's Allowed Companies.
+async function resolveCompany(odoo, companyId, { fallbackId, log }) {
+  const { defaultId, list } = await odoo.companies();
+  const id = companyId ?? fallbackId ?? defaultId;
+  const company = list.find((c) => c.id === id);
+  if (!company) throw new Error(`Odoo company id ${id} is not one of the API user's allowed companies`);
+  const source = companyId ? 'selected' : fallbackId ? 'ODOO_COMPANY_ID' : 'user default';
+  log(`Using Odoo company "${company.name}" (id ${id}, ${source})`);
+  return id;
 }
 
-// Matches a company name to one of the API user's Allowed Companies in Odoo (case-insensitive), else ODOO_COMPANY_ID,
-// else the user's default company.
-async function resolveCompany(odoo, name, { fallbackId, log }) {
-  const { defaultId, list } = await odoo.companies();
-  if (name) {
-    const wanted = name.trim().toLowerCase();
-    const match = list.find((company) => company.name.trim().toLowerCase() === wanted);
-    if (!match) {
-      throw new Error(
-        `Odoo company "${name}" not found among this user's allowed companies (${list.map((c) => c.name).join(', ')}). ` +
-          "Rename it to match, or add it to the API user's Allowed Companies in Odoo.",
-      );
+// A combined Odoo invoice lists the refs of all its Karbon invoices in its ref field, joined by REF_SEPARATOR.
+const REF_SEPARATOR = ', ';
+
+// Finds which Karbon invoices are already in a non-cancelled Odoo invoice, in any of the API user's companies,
+// including ones combined with other Karbon invoices. Returns Map(ref -> move).
+export async function findExisting(odoo, invoices) {
+  const refs = invoices.map(invoiceRef);
+  if (!refs.length) return new Map();
+  // ilike finds each ref inside a combined ref field; the exact split below drops partial matches (KIN-1 in KIN-10).
+  const anyRef = [...Array(refs.length - 1).fill('|'), ...refs.map((ref) => ['ref', 'ilike', ref])];
+  const moves = await odoo.searchRead(
+    'account.move',
+    [...anyRef, ['move_type', '=', 'out_invoice'], ['state', '!=', 'cancel']],
+    ['id', 'ref', 'name', 'state', 'company_id', 'partner_id'],
+    { context: { allowed_company_ids: (await odoo.companies()).list.map((c) => c.id) } },
+  );
+  const wanted = new Set(refs);
+  const found = new Map();
+  for (const move of moves) {
+    for (const ref of String(move.ref || '').split(REF_SEPARATOR.trim()).map((part) => part.trim())) {
+      if (wanted.has(ref)) found.set(ref, move);
     }
-    log(`Using Odoo company "${match.name}" (id ${match.id})`);
-    return match.id;
   }
-  const id = fallbackId ?? defaultId;
-  const company = list.find((c) => c.id === id);
-  if (!company) throw new Error(`ODOO_COMPANY_ID=${id} is not one of this user's allowed companies`);
-  log(`No company name from Karbon, using ${fallbackId ? 'ODOO_COMPANY_ID' : 'the user default'} "${company.name}" (id ${id})`);
-  return id;
+  return found;
 }
 
 // ODOO_JOURNAL_ID only fits invoices of the journal's own company; other companies get their default sales journal.
@@ -100,37 +120,73 @@ async function findOrCreatePartner(odoo, name, { companyId, dryRun, log }) {
   return id;
 }
 
-// Syncs one Karbon invoice. Returns { status: 'exists' | 'would_create' | 'created', id?, ref, partnerName }.
+const latest = (values) => values.filter(Boolean).sort().at(-1) ?? false;
+
+// Creates one Odoo customer invoice from one or more Karbon invoices.
+// Returns { status: 'exists' | 'would_create' | 'created', id?, ref, partnerName }.
+// - companyId is the Odoo company picked in the UI; without it ODOO_COMPANY_ID or the user's default company is used.
+// - partnerId is the Odoo customer picked in the UI; without it the customer is matched by the Karbon client name,
+//   which for several invoices must be the same client.
+// - Several invoices are combined into one Odoo invoice: one section per Karbon invoice followed by its lines, dated
+//   with the latest invoice and due date. They must share a currency, and none may already be in Odoo.
 // log receives a line per step; the webhook passes one, the batch sync stays quiet.
-export async function syncInvoice({ invoice, karbon, odoo, config, dryRun = false, log = () => {} }) {
-  const ref = invoiceRef(invoice);
-  log(`Checking Odoo for an existing invoice with ref ${ref}`);
+export async function createOdooInvoice({
+  invoices,
+  karbon,
+  odoo,
+  config,
+  companyId: requestedCompanyId,
+  partnerId: requestedPartnerId,
+  dryRun = false,
+  log = () => {},
+}) {
+  const refs = invoices.map(invoiceRef);
+  const ref = refs.join(REF_SEPARATOR);
+  log(`Checking Odoo for existing invoices with ref ${ref}`);
   // Karbon invoice numbers are unique across the practice, so this check spans all companies.
-  const [already] = await odoo.searchRead('account.move', [['ref', '=', ref], ['move_type', '=', 'out_invoice']], ['id', 'company_id'], {
-    limit: 1,
-    context: { allowed_company_ids: (await odoo.companies()).list.map((c) => c.id) },
-  });
-  if (already) {
+  const existing = await findExisting(odoo, invoices);
+  if (existing.size && invoices.length === 1) {
+    const already = existing.get(refs[0]);
     log(`Invoice ${ref} already exists in Odoo (id ${already.id}, company "${already.company_id[1]}"), skipping`);
-    return { status: 'exists', id: already.id, ref };
+    return { status: 'exists', id: already.id, ref, companyName: already.company_id[1] };
+  }
+  if (existing.size) {
+    const list = [...existing].map(([r, move]) => `${r} (Odoo id ${move.id})`).join(', ');
+    throw new Error(`Already in Odoo, unselect them to combine the rest: ${list}`);
   }
 
-  if (!invoice.LineItems) log(`Invoice has no line items loaded, fetching ${invoice.InvoiceKey} from Karbon`);
-  const full = invoice.LineItems ? invoice : await karbon.getInvoice(invoice.InvoiceKey);
-  const partnerName = clientName(full);
-  const companyId = await resolveCompany(odoo, await karbonCompanyName(full, karbon), { fallbackId: config.odoo.companyId, log });
-  const currencyId = full.CurrencyCode ? await findCurrency(odoo, full.CurrencyCode, { log }) : undefined;
-  const partnerId = await findOrCreatePartner(odoo, partnerName, { companyId, dryRun, log });
-  const lines = mapLines(full, config.odoo);
+  const fulls = [];
+  for (const invoice of invoices) {
+    if (!invoice.LineItems) log(`Invoice has no line items loaded, fetching ${invoice.InvoiceKey} from Karbon`);
+    fulls.push(invoice.LineItems ? invoice : await karbon.getInvoice(invoice.InvoiceKey));
+  }
+  const combined = fulls.length > 1;
+  const currencies = [...new Set(fulls.map((full) => full.CurrencyCode).filter(Boolean))];
+  if (currencies.length > 1) throw new Error(`Invoices in different currencies (${currencies.join(', ')}) cannot be combined`);
+  const clients = [...new Set(fulls.map(clientName))];
+  if (!requestedPartnerId && clients.length > 1) {
+    throw new Error('Invoices for different Karbon clients can only be combined into one chosen Odoo customer');
+  }
+
+  const partnerName = clients[0];
+  const companyId = await resolveCompany(odoo, requestedCompanyId, { fallbackId: config.odoo.companyId, log });
+  const currencyId = currencies[0] ? await findCurrency(odoo, currencies[0], { log }) : undefined;
+  const partnerId = requestedPartnerId ?? (await findOrCreatePartner(odoo, partnerName, { companyId, dryRun, log }));
+  if (requestedPartnerId) log(`Using selected Odoo customer id ${requestedPartnerId}`);
+  const precision = await odoo.precision();
+  const lines = fulls.flatMap((full) => [
+    ...(combined ? [{ display_type: 'line_section', name: `${full.InvoiceNumber} · ${toDate(full.InvoiceDate)}` }] : []),
+    ...mapLines(full, config.odoo, precision),
+  ]);
   const journalId = await journalFor(odoo, config.odoo.journalId, companyId, { log });
-  log(`Mapped ${lines.length} line(s) for ${ref}: ${lines.map((line) => `${line.quantity} x ${line.price_unit}`).join(', ')}`);
+  log(`Mapped ${lines.length} line(s) for ${ref}: ${lines.filter((line) => !line.display_type).map((line) => `${line.quantity} x ${line.price_unit}`).join(', ')}`);
 
   const values = {
     move_type: 'out_invoice',
     partner_id: partnerId,
     ref,
-    invoice_date: toDate(full.InvoiceDate),
-    invoice_date_due: toDate(full.PaymentDueDate ?? full.DueDate),
+    invoice_date: latest(fulls.map((full) => toDate(full.InvoiceDate))),
+    invoice_date_due: latest(fulls.map((full) => toDate(full.PaymentDueDate ?? full.DueDate))),
     invoice_line_ids: lines.map((line) => [0, 0, line]),
     company_id: companyId,
     ...(currencyId ? { currency_id: currencyId } : {}),
@@ -139,10 +195,15 @@ export async function syncInvoice({ invoice, karbon, odoo, config, dryRun = fals
 
   if (dryRun) return { status: 'would_create', ref, partnerName, lines: lines.length };
 
-  log(`Creating invoice ${ref} in Odoo`);
+  log(`Creating ${combined ? `one combined invoice for ${refs.length} Karbon invoices` : `invoice ${ref}`} in Odoo`);
   const id = await odoo.create('account.move', values, { allowed_company_ids: [companyId] });
   log(`Created Odoo invoice id ${id}`);
   return { status: 'created', id, ref, partnerName, companyId };
+}
+
+// Syncs one Karbon invoice into its own Odoo invoice. See createOdooInvoice.
+export function syncInvoice({ invoice, ...options }) {
+  return createOdooInvoice({ invoices: [invoice], ...options });
 }
 
 export async function syncInvoices({ karbon, odoo, config, dryRun = false, log = console.log }) {

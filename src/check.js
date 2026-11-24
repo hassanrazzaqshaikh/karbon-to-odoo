@@ -22,7 +22,7 @@ async function main() {
     const uid = await odoo.login();
     console.log(`Odoo:   OK (server ${version}, uid ${uid})`);
     const { defaultId, list: companies } = await odoo.companies();
-    console.log('Odoo companies this user can invoice into (Karbon company names must match these):');
+    console.log('Odoo companies this user can invoice into (shown in the invoice picker):');
     for (const company of companies) {
       const marks = [company.id === defaultId && 'user default', company.id === config.odoo.companyId && 'ODOO_COMPANY_ID'].filter(Boolean);
       console.log(`  ${company.id}  ${company.name} (${company.currency_id[1]})${marks.length ? `  <- ${marks.join(', ')}` : ''}`);

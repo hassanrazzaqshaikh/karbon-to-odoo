@@ -58,6 +58,14 @@ export class KarbonClient {
     return items;
   }
 
+  // One page of approved invoices, newest first. Karbon includes the total match count as @odata.count.
+  async listApprovedInvoices({ skip = 0, top = 100 } = {}) {
+    const filter = encodeURIComponent("InvoiceStatus eq 'Approved'");
+    const orderBy = encodeURIComponent('InvoiceDate desc');
+    const page = await this.get(`/Invoices?$filter=${filter}&$orderby=${orderBy}&$top=${top}&$skip=${skip}`);
+    return { invoices: page.value ?? [], total: page['@odata.count'] ?? null };
+  }
+
   async getInvoice(invoiceKey) {
     return this.get(`/Invoices/${encodeURIComponent(invoiceKey)}?$expand=LineItems`);
   }}

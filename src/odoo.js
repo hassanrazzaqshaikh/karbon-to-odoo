@@ -8,6 +8,7 @@ export class OdooClient {
     this.uid = null;
     this.requestId = 0;
     this.companiesCache = null;
+    this.precisionCache = null;
   }
 
   async rpc(service, method, args) {
@@ -53,14 +54,27 @@ export class OdooClient {
   }
 
   // Companies the API user may work in (their Allowed Companies), plus which one is their default. Cached per client.
-  async companies() {
-    if (!this.companiesCache) {
+  async companies({ refresh = false } = {}) {
+    if (!this.companiesCache || refresh) {
       if (!this.uid) await this.login();
       const [user] = await this.searchRead('res.users', [['id', '=', this.uid]], ['company_id', 'company_ids']);
       const list = await this.searchRead('res.company', [['id', 'in', user.company_ids]], ['id', 'name', 'currency_id']);
       this.companiesCache = { defaultId: user.company_id[0], list };
     }
     return this.companiesCache;
+  }
+
+  // Decimal places Odoo keeps for line quantities and unit prices (Settings > Technical > Decimal Accuracy). Cached.
+  async precision() {
+    if (!this.precisionCache) {
+      const rows = await this.searchRead('decimal.precision', [['name', 'in', ['Product Unit', 'Product Unit of Measure', 'Product Price']]], ['name', 'digits']);
+      const digits = (name) => rows.find((row) => row.name === name)?.digits;
+      this.precisionCache = {
+        quantityDigits: digits('Product Unit') ?? digits('Product Unit of Measure') ?? 2,
+        priceDigits: digits('Product Price') ?? 2,
+      };
+    }
+    return this.precisionCache;
   }
 
   version() {

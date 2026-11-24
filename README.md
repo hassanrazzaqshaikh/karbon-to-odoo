@@ -1,5 +1,5 @@
-# karbon-to-odoo
-Karbon to Odoo Invoicing Sample
+# KarboSync
+Karbon to Odoo invoicing, by Teakwood Global Services
 
 Pulls invoices from the Karbon v3 API and creates them as customer invoices (`account.move`) in Odoo via JSON-RPC. Re-running is safe: invoices already in Odoo (matched on `ref = KARBON-<invoice number>`) are skipped.
 
@@ -22,10 +22,32 @@ npm run sync      # run the sync
 
 Set `SYNC_SINCE=YYYY-MM-DD` in `.env` to limit which Karbon invoices are pulled.
 
-Multi-company: each invoice is created in the Odoo company whose name matches the company name from Karbon
-(case-insensitive, see `karbonCompanyName` in `src/sync.js`). The API user needs every such company in its
-Allowed Companies; `npm run check` lists them. When Karbon gives no company, `ODOO_COMPANY_ID` is used, else the
-user's default company. `ODOO_JOURNAL_ID` only applies to invoices in that journal's company.
+## Invoice picker (choose the Odoo company)
+
+`npm start` and open http://localhost:3000/. The page lists approved Karbon invoices (newest first, 100 at a time),
+marks the ones already in Odoo, and lets you tick invoices, choose an Odoo company and send them. Invoices are sent one
+at a time, and each row shows the result with a link to the Odoo invoice. An invoice already in Odoo (in any company)
+is never created twice; a cancelled Odoo invoice doesn't count, so it can be sent again.
+
+Send to Odoo opens a dialog to choose the Odoo customer: match each invoice's Karbon client by name (creating the
+customer if missing), send all selected invoices to one existing Odoo customer (searchable list), or create a new
+customer and send them all to it. With several invoices selected, choose one Odoo invoice per Karbon invoice, or
+combine them into one Odoo invoice: each Karbon invoice becomes a section followed by its lines, the Odoo reference
+lists all their numbers, and it is dated with the latest invoice and due date. Combining needs one customer and one
+currency. Invoices are created as drafts in Odoo.
+
+- The company list comes from Odoo: the API user's Allowed Companies. Add a company there to make it selectable.
+- Sign in with an Odoo username and password from the `ODOO_DB` database (an Odoo API key also works, and is
+  required for users with two-factor authentication). Only users allowed to create customer invoices can sign in,
+  and the company list only shows companies that user may use in Odoo. Passwords are never stored: the session is a
+  signed cookie that lasts 8 hours. Set `SESSION_SECRET` to sign it; otherwise a key derived from `ODOO_API_KEY` is
+  used. After 5 failed sign-ins a username is locked for 5 minutes.
+- Invoices are still created through the API user (`ODOO_USERNAME`), so in Odoo they show that user as the
+  creator. The app's logs record which signed-in user sent each one.
+- The CLI sync and the webhook have no company picker: they use `ODOO_COMPANY_ID`, else the API user's default
+  company. Leave `WEBHOOK_SYNC_TO_ODOO` off if every invoice should go through the picker.
+- `ODOO_JOURNAL_ID` only applies to invoices in that journal's company; other companies use their default sales journal.
+- The old status page is now at `/status`.
 
 ## Webhook receiver (Karbon -> this server)
 
@@ -63,8 +85,8 @@ so re-subscribe when it does. Karbon cancels the subscription after 10 consecuti
 `api/` holds the Vercel functions and `vercel.json` maps `/webhooks/karbon` and `/health` to them, so the
 Karbon `TargetUrl` is `https://<your-project>.vercel.app/webhooks/karbon`.
 
-`.env` is not deployed: add `KARBON_ACCESS_KEY`, `KARBON_BEARER_TOKEN`, `KARBON_WEBHOOK_SIGNING_KEY` and
-`WEBHOOK_SYNC_TO_ODOO` (plus the `ODOO_*` vars if syncing to Odoo) under Project Settings > Environment Variables,
+`.env` is not deployed: add `KARBON_ACCESS_KEY`, `KARBON_BEARER_TOKEN`, `KARBON_WEBHOOK_SIGNING_KEY`,
+`WEBHOOK_SYNC_TO_ODOO`, `SESSION_SECRET` and the `ODOO_*` vars under Project Settings > Environment Variables,
 then redeploy. On Vercel events are written to the function logs only, not `logs/webhook-events.jsonl`.
 
 ## Version number
